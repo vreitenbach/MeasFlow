@@ -427,39 +427,52 @@ def _decode_frame(data: bytes, offset: int, bus_type: BusType):
     direction = FrameDirection(data[offset]); offset += 1
     (flags,) = struct.unpack_from("<H", data, offset); offset += 2
 
-    common = dict(name=name, frame_id=frame_id, payload_length=payload_len,
-                  direction=direction, flags=flags)
+    base = dict(name=name, frame_id=frame_id, payload_length=payload_len,
+                direction=direction, flags=flags)
     if bus_type == BusType.CAN:
         is_ext = bool(data[offset]); offset += 1
-        frame: FrameDefinition = CanFrameDefinition(**common, is_extended_id=is_ext)
+        frame: FrameDefinition = CanFrameDefinition(
+            name=name, frame_id=frame_id, payload_length=payload_len,
+            direction=direction, flags=flags, is_extended_id=is_ext)
     elif bus_type == BusType.CAN_FD:
         is_ext = bool(data[offset]); offset += 1
         brs = bool(data[offset]); offset += 1
         esi = bool(data[offset]); offset += 1
-        frame = CanFdFrameDefinition(**common, is_extended_id=is_ext, bit_rate_switch=brs,
-                                     error_state_indicator=esi)
+        frame = CanFdFrameDefinition(
+            name=name, frame_id=frame_id, payload_length=payload_len,
+            direction=direction, flags=flags,
+            is_extended_id=is_ext, bit_rate_switch=brs, error_state_indicator=esi)
     elif bus_type == BusType.LIN:
         nad = data[offset]; offset += 1
         cs_type = LinChecksumType(data[offset]); offset += 1
-        frame = LinFrameDefinition(**common, nad=nad, checksum_type=cs_type)
+        frame = LinFrameDefinition(
+            name=name, frame_id=frame_id, payload_length=payload_len,
+            direction=direction, flags=flags, nad=nad, checksum_type=cs_type)
     elif bus_type == BusType.FLEX_RAY:
         cycle = data[offset]; offset += 1
         ch = FlexRayChannel(data[offset]); offset += 1
-        frame = FlexRayFrameDefinition(**common, cycle_count=cycle, channel=ch)
+        frame = FlexRayFrameDefinition(
+            name=name, frame_id=frame_id, payload_length=payload_len,
+            direction=direction, flags=flags, cycle_count=cycle, channel=ch)
     elif bus_type == BusType.ETHERNET:
         mac_src = bytes(data[offset:offset + 6]); offset += 6
         mac_dst = bytes(data[offset:offset + 6]); offset += 6
         (vlan,) = struct.unpack_from("<H", data, offset); offset += 2
         (etype,) = struct.unpack_from("<H", data, offset); offset += 2
-        frame = EthernetFrameDefinition(**common, mac_source=mac_src, mac_destination=mac_dst,
-                                        vlan_id=vlan, ether_type=etype)
+        frame = EthernetFrameDefinition(
+            name=name, frame_id=frame_id, payload_length=payload_len,
+            direction=direction, flags=flags,
+            mac_source=mac_src, mac_destination=mac_dst, vlan_id=vlan, ether_type=etype)
     elif bus_type == BusType.MOST:
         (fb,) = struct.unpack_from("<H", data, offset); offset += 2
         inst = data[offset]; offset += 1
         (fid,) = struct.unpack_from("<H", data, offset); offset += 2
-        frame = MostFrameDefinition(**common, function_block=fb, instance_id=inst, function_id=fid)
+        frame = MostFrameDefinition(
+            name=name, frame_id=frame_id, payload_length=payload_len,
+            direction=direction, flags=flags,
+            function_block=fb, instance_id=inst, function_id=fid)
     else:
-        frame = FrameDefinition(**common)
+        frame = FrameDefinition(**base)
 
     (sig_count,) = struct.unpack_from("<i", data, offset); offset += 4
     for _ in range(sig_count):

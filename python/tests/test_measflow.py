@@ -61,9 +61,9 @@ def test_roundtrip_int32(tmp_meas):
         ch.write_bulk(data)
 
     with MeasReader(tmp_meas) as r:
-        result = r["G"]["Count"].read_all().tolist()
+        result = r["G"]["Count"].read_all()
 
-    assert result == data
+    assert list(np.asarray(result, dtype=np.int32)) == data
 
 
 def test_roundtrip_timestamp(tmp_meas):
@@ -257,6 +257,7 @@ def test_bus_def_roundtrip():
     raw = encode_bus_def(bus_def)
     decoded = decode_bus_def(raw)
 
+    assert isinstance(decoded.bus_config, CanBusConfig)
     assert decoded.bus_config.baud_rate == 500_000
     assert decoded.raw_frame_channel_name == "RawCAN"
     assert len(decoded.frames) == 1
@@ -293,6 +294,7 @@ def test_bus_def_stored_in_group_property(tmp_meas):
         restored = decode_bus_def(raw_prop)
 
     assert restored.frames[0].name == "VehicleSpeed"
+    assert isinstance(restored.bus_config, CanBusConfig)
     assert restored.bus_config.baud_rate == 250_000
 
 
@@ -349,63 +351,7 @@ def test_read_csharp_demo_file():
         assert motor["RPM"].sample_count == 1000
         assert motor["OilTemperature"].sample_count == 1000
 
-        rpm = motor["RPM"].read_all()
-        assert len(rpm) == 1000
-        assert rpm.min() > 2000
-        assert rpm.max() < 4000
-        assert props["Run"].value == 42
-
-
-def test_channel_properties(tmp_meas):
-    with MeasWriter(tmp_meas) as w:
-        g = w.add_group("G")
-        ch = g.add_channel("Voltage", MeasDataType.Float64)
-        ch.properties["Unit"] = "V"
-        ch.write(3.14)
-
-    with MeasReader(tmp_meas) as r:
-        assert r["G"]["Voltage"].properties["Unit"].value == "V"
-
-
-# ── Variable-size channel types (§7) ────────────────────────────────────────
-
-def test_roundtrip_binary(tmp_meas):
-    frames = [b"\x01\x02\x03", b"", b"\xff\xfe"]
-    with MeasWriter(tmp_meas) as w:
-        g = w.add_group("Bus")
-        ch = g.add_channel("Frames", MeasDataType.Binary)
-        ch.write_bulk(frames)
-
-    with MeasReader(tmp_meas) as r:
-        result = r["Bus"]["Frames"].read_all()
-
-    assert result == frames
-
-
-def test_roundtrip_utf8string(tmp_meas):
-    strings = ["hello", "welt", "üäö"]
-    with MeasWriter(tmp_meas) as w:
-        g = w.add_group("Log")
-        ch = g.add_channel("Messages", MeasDataType.Utf8String)
-        ch.write_bulk(strings)
-
-    with MeasReader(tmp_meas) as r:
-        result = r["Log"]["Messages"].read_all()
-
-    assert result == strings
-
-
-# ── Interoperability ─────────────────────────────────────────────────────────
-
-def test_read_csharp_demo_file():
-    """Read the C#-generated demo file and verify basic structure."""
-    with MeasReader(str(DEMO_FILE)) as r:
-        assert len(r.groups) >= 1
-        motor = r["Motor"]
-        assert motor["RPM"].sample_count == 1000
-        assert motor["OilTemperature"].sample_count == 1000
-
-        rpm = motor["RPM"].read_all()
+        rpm = np.asarray(motor["RPM"].read_all())
         assert len(rpm) == 1000
         # Sanity: RPM values should be in a plausible range
         assert rpm.min() > 2000
