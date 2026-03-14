@@ -119,7 +119,7 @@ class MeasWriter:
         self._groups: list[GroupWriter] = []
         self._segment_count = 0
         self._metadata_written = False
-        self._created_ns = int(time.time() * 1_000_000_000)
+        self._created_ns = time.time_ns()
         self._file_id = uuid.uuid4().bytes
         # Open file immediately and write placeholder header
         self._file = open(path, "wb")

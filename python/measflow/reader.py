@@ -15,7 +15,6 @@ from measflow._codec import (
     GroupDef,
     decode_metadata,
     decode_chunk_header,
-    FILE_HEADER_SIZE,
     SEGMENT_HEADER_SIZE,
 )
 
@@ -42,6 +41,8 @@ class MeasChannel:
     def read_all(self) -> Union[np.ndarray, list]:
         """Return all samples as a numpy array (fixed-size types) or a list (variable-size types)."""
         if not self._chunks:
+            if self.data_type in (MeasDataType.Binary, MeasDataType.Utf8String):
+                return []
             dtype = _TYPE_NUMPY.get(self.data_type, "<i8")
             return np.array([], dtype=dtype)
         if self.data_type == MeasDataType.Binary:
@@ -68,7 +69,12 @@ class MeasChannel:
         return [MeasTimestamp(int(v)) for v in self.read_all()]
 
     def read_chunks(self):
-        """Iterate over data chunks (§12.2). Yields np.ndarray per Data segment written."""
+        """Iterate over data chunks (§12.2).
+
+        Yields one item per Data segment written via flush():
+        - ``np.ndarray`` for fixed-size types (numeric, Timestamp)
+        - ``list`` for variable-size types (Binary, Utf8String)
+        """
         for _, raw in self._chunks:
             if self.data_type == MeasDataType.Binary:
                 yield self._decode_single_chunk_frames(raw, bytes_only=True)
