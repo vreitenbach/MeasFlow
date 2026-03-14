@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import struct
-from typing import Any
+from typing import Any, Union
 
 import numpy as np
 
@@ -39,21 +39,57 @@ class MeasChannel:
     def sample_count(self) -> int:
         return sum(n for n, _ in self._chunks)
 
-    def read_all(self) -> np.ndarray:
-        """Return all samples as a numpy array."""
+    def read_all(self) -> Union[np.ndarray, list]:
+        """Return all samples as a numpy array (fixed-size types) or a list (variable-size types)."""
         if not self._chunks:
             dtype = _TYPE_NUMPY.get(self.data_type, "<i8")
             return np.array([], dtype=dtype)
+        if self.data_type == MeasDataType.Binary:
+            return self._decode_frames(bytes_only=True)
+        if self.data_type == MeasDataType.Utf8String:
+            return self._decode_frames(bytes_only=False)
         if self.data_type not in _TYPE_NUMPY:
             raise ValueError(f"Cannot decode channel type {self.data_type!r}")
         parts = [np.frombuffer(raw, dtype=_TYPE_NUMPY[self.data_type]) for _, raw in self._chunks]
         return np.concatenate(parts) if len(parts) > 1 else parts[0].copy()
+
+    def _decode_frames(self, bytes_only: bool) -> list:
+        """Decode §7 variable-size frame format: [int32: len][bytes: data] per sample."""
+        import struct as _struct
+        result = []
+        for _, raw in self._chunks:
+            result.extend(self._decode_single_chunk_frames(raw, bytes_only))
+        return result
 
     def read_timestamps(self) -> list[MeasTimestamp]:
         """Read all samples as MeasTimestamp objects (Timestamp channels only)."""
         if self.data_type != MeasDataType.Timestamp:
             raise ValueError(f"Channel '{self.name}' has type {self.data_type.name}, not Timestamp")
         return [MeasTimestamp(int(v)) for v in self.read_all()]
+
+    def read_chunks(self):
+        """Iterate over data chunks (§12.2). Yields np.ndarray per Data segment written."""
+        for _, raw in self._chunks:
+            if self.data_type == MeasDataType.Binary:
+                yield self._decode_single_chunk_frames(raw, bytes_only=True)
+            elif self.data_type == MeasDataType.Utf8String:
+                yield self._decode_single_chunk_frames(raw, bytes_only=False)
+            elif self.data_type in _TYPE_NUMPY:
+                yield np.frombuffer(raw, dtype=_TYPE_NUMPY[self.data_type]).copy()
+            else:
+                raise ValueError(f"Cannot decode channel type {self.data_type!r}")
+
+    def _decode_single_chunk_frames(self, raw: bytes, bytes_only: bool) -> list:
+        import struct as _struct
+        result = []
+        pos = 0
+        while pos < len(raw):
+            (frame_len,) = _struct.unpack_from("<i", raw, pos)
+            pos += 4
+            frame = raw[pos: pos + frame_len]
+            pos += frame_len
+            result.append(frame if bytes_only else frame.decode("utf-8"))
+        return result
 
     def __repr__(self) -> str:
         return f"MeasChannel({self.name!r}, {self.data_type.name}, samples={self.sample_count})"
