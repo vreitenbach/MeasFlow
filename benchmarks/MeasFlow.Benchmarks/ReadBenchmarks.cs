@@ -9,7 +9,7 @@ namespace MeasFlow.Benchmarks;
 [MemoryDiagnoser]
 public class ReadBenchmarks
 {
-    [Params(10_000, 100_000, 1_000_000)]
+    [Params(10_000, 100_000)]
     public int SampleCount { get; set; }
 
     private string _tempDir = null!;

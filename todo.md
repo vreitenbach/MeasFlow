@@ -1,6 +1,7 @@
 # TODO
 
 ## Core Format
+
 - [x] Binary format specification (SPECIFICATION.md)
 - [x] Streaming write/read support with incremental flush
 - [x] Channel statistics (Welford's online algorithm)
@@ -10,9 +11,9 @@
 - [x] Performance benchmarks (BenchmarkDotNet)
 - [ ] Compression (LZ4/Zstd segments)
 - [ ] Memory-mapped I/O for large files
-- [ ] DBC/ARXML import
 
 ## Cross-Language Implementations
+
 - [ ] C Reader
 - [ ] C Writer
 - [ ] Python Reader
@@ -21,6 +22,7 @@
 - [ ] Rust Writer
 
 ## Tools & Integrations
+
 - [ ] Comparison with other formats (TDMS, HDF5, MDF4) using same data
 - [ ] Data Viewer (signal plots, frame browser)
 - [ ] MATLAB integration
