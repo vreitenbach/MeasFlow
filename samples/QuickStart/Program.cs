@@ -135,7 +135,12 @@ using (var reader = OmxFile.OpenRead("demo_measurement.omx"))
                 Console.WriteLine($"    {key} = {value}");
 
             foreach (var channel in group.Channels)
-                Console.WriteLine($"    Channel: {channel.Name} [{channel.DataType}] ({channel.SampleCount} samples)");
+            {
+                Console.Write($"    Channel: {channel.Name} [{channel.DataType}] ({channel.SampleCount} samples)");
+                if (channel.Statistics is { } stats)
+                    Console.Write($" | {stats}");
+                Console.WriteLine();
+            }
         }
     }
 

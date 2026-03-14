@@ -122,7 +122,9 @@ public sealed class OmxWriter : IDisposable
             foreach (var ch in group.ChannelWriters)
             {
                 ch.GlobalIndex = globalIndex++;
-                channelDefs.Add(new OmxChannelDefinition(ch.Name, ch.DataType, new Dictionary<string, OmxValue>(ch.Properties)));
+                var props = new Dictionary<string, OmxValue>(ch.Properties);
+                ch.WriteStatistics(props);
+                channelDefs.Add(new OmxChannelDefinition(ch.Name, ch.DataType, props));
             }
             groups.Add(new OmxGroupDefinition(
                 group.Name,
@@ -277,6 +279,9 @@ public abstract class ChannelWriter
         Name = name;
         DataType = dataType;
     }
+
+    /// <summary>Write statistics to properties dictionary. Override in typed writers.</summary>
+    internal virtual void WriteStatistics(Dictionary<string, OmxValue> props) { }
 }
 
 /// <summary>
@@ -285,17 +290,34 @@ public abstract class ChannelWriter
 public sealed class ChannelWriter<T> : ChannelWriter where T : unmanaged
 {
     private readonly List<T> _buffer = [];
+    private readonly bool _trackStats = NumericConverter.IsNumeric<T>();
+    private StatisticsAccumulator _stats;
 
     internal ChannelWriter(string name, OmxDataType dataType) : base(name, dataType) { }
 
     internal override bool HasPendingData => _buffer.Count > 0;
 
-    public void Write(T value) => _buffer.Add(value);
+    /// <summary>Current running statistics for this channel.</summary>
+    public ChannelStatistics Statistics => _stats.ToStatistics();
+
+    public void Write(T value)
+    {
+        _buffer.Add(value);
+        if (_trackStats) _stats.Update(NumericConverter.ToDouble(value));
+    }
 
     public void Write(ReadOnlySpan<T> values)
     {
         foreach (var v in values)
+        {
             _buffer.Add(v);
+            if (_trackStats) _stats.Update(NumericConverter.ToDouble(v));
+        }
+    }
+
+    internal override void WriteStatistics(Dictionary<string, OmxValue> props)
+    {
+        if (_trackStats) _stats.ToStatistics().WriteToProperties(props);
     }
 
     internal override void FlushToStream(Stream stream, int globalIndex)

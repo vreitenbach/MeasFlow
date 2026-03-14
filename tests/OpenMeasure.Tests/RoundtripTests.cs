@@ -170,4 +170,61 @@ public class RoundtripTests : IDisposable
         var data = reader["Streaming"]["Signal"].ReadAll<float>();
         Assert.Equal([1.0f, 2.0f, 3.0f, 4.0f], data);
     }
+
+    [Fact]
+    public void ChannelStatistics_ComputedDuringWrite_AvailableOnRead()
+    {
+        var path = TempFile("stats.omx");
+        float[] data = [10.0f, 20.0f, 30.0f, 40.0f, 50.0f];
+
+        using (var writer = OmxFile.CreateWriter(path))
+        {
+            var group = writer.AddGroup("Stats");
+            var ch = group.AddChannel<float>("Values");
+            ch.Write(data.AsSpan());
+
+            // Stats available during write
+            var writeStats = ch.Statistics;
+            Assert.Equal(5, writeStats.Count);
+            Assert.Equal(10.0, writeStats.Min, 1);
+            Assert.Equal(50.0, writeStats.Max, 1);
+            Assert.Equal(30.0, writeStats.Mean, 1);
+            Assert.Equal(10.0, writeStats.First, 1);
+            Assert.Equal(50.0, writeStats.Last, 1);
+        }
+
+        // Stats available on read without reading data
+        using var reader = OmxFile.OpenRead(path);
+        var channel = reader["Stats"]["Values"];
+        var stats = channel.Statistics;
+
+        Assert.NotNull(stats);
+        Assert.Equal(5, stats.Value.Count);
+        Assert.Equal(10.0, stats.Value.Min, 1);
+        Assert.Equal(50.0, stats.Value.Max, 1);
+        Assert.Equal(30.0, stats.Value.Mean, 1);
+        Assert.Equal(150.0, stats.Value.Sum, 1);
+        Assert.Equal(10.0, stats.Value.First, 1);
+        Assert.Equal(50.0, stats.Value.Last, 1);
+
+        // Variance of [10,20,30,40,50] = 200 (population), StdDev ≈ 14.14
+        Assert.Equal(200.0, stats.Value.Variance, 1);
+        Assert.Equal(14.14, stats.Value.StdDev, 1);
+    }
+
+    [Fact]
+    public void ChannelStatistics_NotAvailableForBinaryChannels()
+    {
+        var path = TempFile("stats_bin.omx");
+
+        using (var writer = OmxFile.CreateWriter(path))
+        {
+            var group = writer.AddGroup("Raw");
+            var raw = group.AddRawChannel("Frames");
+            raw.WriteFrame(new byte[] { 1, 2, 3 });
+        }
+
+        using var reader = OmxFile.OpenRead(path);
+        Assert.Null(reader["Raw"]["Frames"].Statistics);
+    }
 }

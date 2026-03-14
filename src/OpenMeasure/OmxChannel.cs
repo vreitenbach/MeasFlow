@@ -19,6 +19,12 @@ public sealed class OmxChannel
     public string? SourceChannelName => _properties.TryGetValue("omx.source_channel", out var v) ? v.AsString() : null;
 
     /// <summary>
+    /// Pre-computed statistics (Min/Max/Mean/StdDev/Count) from write time.
+    /// Available instantly without reading data. Null for non-numeric channels.
+    /// </summary>
+    public ChannelStatistics? Statistics => ChannelStatistics.ReadFromProperties(_properties);
+
+    /// <summary>
     /// The group-relative index of this channel.
     /// </summary>
     internal int Index { get; }
