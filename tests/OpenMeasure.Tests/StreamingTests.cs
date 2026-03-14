@@ -196,33 +196,13 @@ public class StreamingTests : IDisposable
     /// Proves: Each Flush() writes a self-contained, valid segment to disk.
     /// After Flush() + Dispose(), the file is immediately readable — demonstrating
     /// that the streaming model produces valid output at every flush boundary.
-    /// This proves data is usable incrementally, not only after full completion.
     /// </summary>
     [Fact]
     public void PartialFileRead_SegmentsValidAfterEachFlush()
     {
         var path = TempFile("partial.omx");
 
-        // Phase 1: Write 3 samples, flush, close → valid file with 3 values
         using (var writer = OmxFile.CreateWriter(path))
-        {
-            var group = writer.AddGroup("Live");
-            var ch = group.AddChannel<float>("Sensor");
-            ch.Write([1.0f, 2.0f, 3.0f]);
-            writer.Flush();
-        }
-
-        // Verify Phase 1 is a valid, readable file
-        using (var reader = OmxFile.OpenRead(path))
-        {
-            var data = reader["Live"]["Sensor"].ReadAll<float>();
-            Assert.Equal([1.0f, 2.0f, 3.0f], data);
-        }
-
-        // Phase 2: Write new file with MORE data using same structure,
-        // simulating an extended recording session
-        var path2 = TempFile("partial2.omx");
-        using (var writer = OmxFile.CreateWriter(path2))
         {
             var group = writer.AddGroup("Live");
             var ch = group.AddChannel<float>("Sensor");
@@ -231,7 +211,7 @@ public class StreamingTests : IDisposable
             ch.Write([1.0f, 2.0f, 3.0f]);
             writer.Flush();
 
-            // Second batch — added later in the "streaming session"
+            // Second batch
             ch.Write([4.0f, 5.0f, 6.0f]);
             writer.Flush();
 
@@ -241,7 +221,7 @@ public class StreamingTests : IDisposable
         }
 
         // Verify ALL batches are present and in order
-        using (var reader = OmxFile.OpenRead(path2))
+        using (var reader = OmxFile.OpenRead(path))
         {
             var data = reader["Live"]["Sensor"].ReadAll<float>();
             Assert.Equal([1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f], data);
@@ -249,10 +229,75 @@ public class StreamingTests : IDisposable
             // Verify data comes from multiple chunks (segments)
             int chunkCount = 0;
             foreach (var chunk in reader["Live"]["Sensor"].ReadChunks<float>())
-            {
                 chunkCount++;
-            }
             Assert.Equal(3, chunkCount); // 3 flushes → 3 data segments
+        }
+    }
+
+    /// <summary>
+    /// Proves: TRUE concurrent read/write — a reader can open and read data
+    /// from an OMX file WHILE the writer still has it open and is actively writing.
+    /// The writer uses FileShare.Read, the reader uses FileShare.ReadWrite.
+    /// The reader handles SegmentCount=0 (header not yet patched) by walking the
+    /// segment chain until end-of-file.
+    /// </summary>
+    [Fact]
+    public void ConcurrentReadWhileWriting_ReaderSeesFlishedData()
+    {
+        var path = TempFile("concurrent.omx");
+
+        using var writer = OmxFile.CreateWriter(path);
+        var group = writer.AddGroup("Live");
+        var ch = group.AddChannel<float>("Sensor");
+
+        // Write first batch and flush to disk
+        ch.Write([1.0f, 2.0f, 3.0f]);
+        writer.Flush();
+
+        // ─── Reader opens the SAME file while writer is still open ───
+        // SegmentCount in the header is still 0 (will be patched on writer.Dispose())
+        // The reader must walk the segment chain using NextSegmentOffset
+        using (var reader = OmxFile.OpenRead(path))
+        {
+            var data = reader["Live"]["Sensor"].ReadAll<float>();
+            Assert.Equal([1.0f, 2.0f, 3.0f], data);
+        }
+
+        // Write second batch and flush
+        ch.Write([4.0f, 5.0f]);
+        writer.Flush();
+
+        // Reader opens again — now sees both batches
+        using (var reader = OmxFile.OpenRead(path))
+        {
+            var data = reader["Live"]["Sensor"].ReadAll<float>();
+            Assert.Equal([1.0f, 2.0f, 3.0f, 4.0f, 5.0f], data);
+
+            // Verify 2 data chunks (one per flush)
+            int chunkCount = 0;
+            foreach (var chunk in reader["Live"]["Sensor"].ReadChunks<float>())
+                chunkCount++;
+            Assert.Equal(2, chunkCount);
+        }
+
+        // Write third batch — NOT flushed yet (only in writer's buffer)
+        ch.Write([6.0f, 7.0f, 8.0f]);
+
+        // Reader should NOT see unflushed data
+        using (var reader = OmxFile.OpenRead(path))
+        {
+            var data = reader["Live"]["Sensor"].ReadAll<float>();
+            Assert.Equal([1.0f, 2.0f, 3.0f, 4.0f, 5.0f], data); // Still only 5 values
+        }
+
+        // Now flush the third batch
+        writer.Flush();
+
+        // Reader sees all 8 values
+        using (var reader = OmxFile.OpenRead(path))
+        {
+            var data = reader["Live"]["Sensor"].ReadAll<float>();
+            Assert.Equal([1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f], data);
         }
     }
 

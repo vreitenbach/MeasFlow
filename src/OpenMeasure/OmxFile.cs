@@ -10,7 +10,7 @@ public static class OmxFile
     /// </summary>
     public static OmxWriter CreateWriter(string path)
     {
-        var stream = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None,
+        var stream = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.Read,
             bufferSize: 64 * 1024);
         return new OmxWriter(stream);
     }

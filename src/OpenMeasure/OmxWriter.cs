@@ -75,6 +75,9 @@ public sealed class OmxWriter : IDisposable
 
         // Write data segment
         WriteDataSegment(pendingChunks);
+
+        // Ensure bytes are visible to concurrent readers
+        _stream.Flush();
     }
 
     public void Dispose()

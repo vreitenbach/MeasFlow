@@ -27,7 +27,7 @@ public sealed class OmxReader : IDisposable
 
     public static OmxReader Open(string path)
     {
-        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
             bufferSize: 64 * 1024);
         var reader = new OmxReader(stream);
         reader.ReadFile();
@@ -49,15 +49,30 @@ public sealed class OmxReader : IDisposable
         _stream.ReadExactly(headerBuf);
         Header = FileHeader.ReadFrom(headerBuf);
 
-        // Walk segments
+        // Walk segments using the forward-linked segment chain.
+        // When SegmentCount > 0 (file closed normally), use it as the upper bound.
+        // When SegmentCount == 0 (writer still open / streaming), walk until
+        // we run out of readable data — this enables concurrent read while writing.
         _stream.Seek(Header.FirstSegmentOffset, SeekOrigin.Begin);
 
+        long fileLength = _stream.Length;
+        long maxSegments = Header.SegmentCount > 0 ? Header.SegmentCount : long.MaxValue;
+
         Span<byte> segBuf = stackalloc byte[SegmentHeader.Size];
-        for (long i = 0; i < Header.SegmentCount; i++)
+        for (long i = 0; i < maxSegments; i++)
         {
             long segStart = _stream.Position;
+
+            // Not enough bytes left for a segment header → stop
+            if (segStart + SegmentHeader.Size > fileLength)
+                break;
+
             _stream.ReadExactly(segBuf);
             var segHeader = SegmentHeader.ReadFrom(segBuf);
+
+            // Not enough bytes left for segment content → stop
+            if (segStart + SegmentHeader.Size + segHeader.ContentLength > fileLength)
+                break;
 
             var content = new byte[segHeader.ContentLength];
             _stream.ReadExactly(content);
