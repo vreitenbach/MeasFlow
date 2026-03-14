@@ -1,13 +1,13 @@
-﻿[build-system]
+[build-system]
 requires = ["setuptools>=68.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "measflow"
 version = "0.1.0"
 description = "Python reader/writer for the MeasFlow (.meas) binary measurement format"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 license = { text = "MIT" }
 dependencies = ["numpy>=1.24"]
 
