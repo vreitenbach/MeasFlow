@@ -472,7 +472,9 @@ def _decode_frame(data: bytes, offset: int, bus_type: BusType):
             direction=direction, flags=flags,
             function_block=fb, instance_id=inst, function_id=fid)
     else:
-        frame = FrameDefinition(**base)
+        frame = FrameDefinition(
+            name=name, frame_id=frame_id, payload_length=payload_len,
+            direction=direction, flags=flags)
 
     (sig_count,) = struct.unpack_from("<i", data, offset); offset += 4
     for _ in range(sig_count):
