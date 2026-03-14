@@ -1,24 +1,14 @@
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Columns;
-using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Jobs;
 using OpenMeasure;
 using OpenMeasure.Bus;
 
 namespace OpenMeasure.Benchmarks;
 
-[Config(typeof(Config))]
+[ShortRunJob]
 [MemoryDiagnoser]
 public class WriteBenchmarks
 {
-    private class Config : ManualConfig
-    {
-        public Config()
-        {
-            AddJob(Job.ShortRun.WithWarmupCount(3).WithIterationCount(5));
-            AddColumn(new ThroughputColumn());
-        }
-    }
 
     [Params(10_000, 100_000, 1_000_000)]
     public int SampleCount { get; set; }
@@ -133,39 +123,4 @@ public class WriteBenchmarks
             ts = ts + TimeSpan.FromMilliseconds(1);
         }
     }
-}
-
-/// <summary>Custom column showing throughput in MB/s.</summary>
-public class ThroughputColumn : IColumn
-{
-    public string Id => "Throughput";
-    public string ColumnName => "Throughput";
-    public bool AlwaysShow => false;
-    public ColumnCategory Category => ColumnCategory.Custom;
-    public int PriorityInCategory => 0;
-    public bool IsNumeric => true;
-    public UnitType UnitType => UnitType.Dimensionless;
-    public string Legend => "Estimated throughput in MB/s";
-
-    public string GetValue(BenchmarkDotNet.Reports.Summary summary, BenchmarkDotNet.Running.BenchmarkCase benchmarkCase)
-    {
-        var report = summary[benchmarkCase];
-        if (report?.ResultStatistics == null) return "N/A";
-
-        var sampleCount = (int)(benchmarkCase.Parameters["SampleCount"] ?? 0);
-        if (sampleCount == 0) return "N/A";
-
-        // Estimate bytes: 4 bytes per float32 sample (approximate)
-        double bytesWritten = sampleCount * 4.0;
-        double nsPerOp = report.ResultStatistics.Mean;
-        double mbPerSec = bytesWritten / nsPerOp * 1000.0; // ns→s, bytes→MB
-
-        return $"{mbPerSec:F1} MB/s";
-    }
-
-    public string GetValue(BenchmarkDotNet.Reports.Summary summary, BenchmarkDotNet.Running.BenchmarkCase benchmarkCase, BenchmarkDotNet.Reports.SummaryStyle style)
-        => GetValue(summary, benchmarkCase);
-
-    public bool IsDefault(BenchmarkDotNet.Reports.Summary summary, BenchmarkDotNet.Running.BenchmarkCase benchmarkCase) => false;
-    public bool IsAvailable(BenchmarkDotNet.Reports.Summary summary) => true;
 }

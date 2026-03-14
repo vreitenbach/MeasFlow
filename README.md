@@ -99,15 +99,76 @@ BusChannelDefinition
  └── ValueTables[]
 ```
 
-## File Format
+## Streaming Architecture
 
-Binary, segment-based format designed for streaming:
+OpenMeasure is **streaming-first** — the format is designed so data can be written and read incrementally without holding the entire file in memory.
 
-| Segment | Content |
-|---------|---------|
-| Header (64B) | Magic, version, creation timestamp |
-| Metadata | Group/channel definitions, bus definitions, properties, statistics |
-| Data (repeated) | Chunked channel data, length-prefixed raw frames |
+### Streaming Writes
+
+```csharp
+using var writer = OmxFile.CreateWriter("live_recording.omx");
+var group = writer.AddGroup("Sensors");
+var temp = group.AddChannel<float>("Temperature");
+
+// Write and flush in chunks — memory stays bounded
+while (recording)
+{
+    float[] batch = ReadFromSensor(batchSize: 10_000);
+    temp.Write(batch.AsSpan());
+    writer.Flush();  // → new data segment on disk, buffer cleared
+}
+// Dispose writes remaining data and patches header
+```
+
+Each `Flush()` creates a new Data segment on disk. The writer only keeps one chunk in memory at a time, regardless of total recording duration.
+
+### Streaming Reads
+
+```csharp
+using var reader = OmxFile.OpenRead("live_recording.omx");
+var channel = reader["Sensors"]["Temperature"];
+
+// Chunk-by-chunk: one segment at a time in memory
+foreach (var chunk in channel.ReadChunks<float>())
+{
+    Process(chunk.Span);  // Only one chunk loaded at a time
+}
+
+// Or: instant statistics without reading any data
+var stats = channel.Statistics;
+Console.WriteLine($"Mean: {stats?.Mean}, StdDev: {stats?.StdDev}");
+```
+
+### Segment-Linked File Layout
+
+```
+┌───────────────────┐
+│  File Header 64B  │  Magic: OMX\0, Version, GUID, Timestamp
+├───────────────────┤
+│  Metadata Segment │  Groups, channels, properties, bus definitions
+│  → NextOffset ────┼──┐
+├───────────────────┤  │
+│  Data Segment #1  │◄─┘  First Flush() result
+│  → NextOffset ────┼──┐
+├───────────────────┤  │
+│  Data Segment #2  │◄─┘  Second Flush() result
+│  → NextOffset ────┼──┐
+├───────────────────┤  │
+│  Data Segment #N  │◄─┘  Final Dispose() data
+└───────────────────┘
+```
+
+Segments form a forward-linked list — readers scan sequentially, no random access needed. Partial files (writer still open) can be read up to the last complete segment.
+
+> **Full specification**: See [SPECIFICATION.md](SPECIFICATION.md) for the complete binary format, including byte offsets, data type encoding, bus metadata, and conformance requirements.
+
+## File Format Summary
+
+| Layer | Content |
+|-------|---------|
+| **Header** (64 B) | Magic `OMX\0`, version, segment count, GUID, creation timestamp |
+| **Metadata Segment** | Group/channel definitions, bus definitions, properties, statistics |
+| **Data Segments** (repeated) | Chunked channel data: fixed-size arrays or length-prefixed raw frames |
 
 Raw frame wire format per bus type:
 
