@@ -16,14 +16,14 @@
 
 - [ ] C Reader
 - [ ] C Writer
-- [ ] Python Reader
-- [ ] Python Writer
+- [x] Python Reader
+- [x] Python Writer
 - [ ] Rust Reader
 - [ ] Rust Writer
 
 ## Tools & Integrations
 
 - [ ] Comparison with other formats (TDMS, HDF5, MDF4) using same data
-- [ ] Data Viewer (signal plots, frame browser)
+- [x] Data Viewer (signal plots, frame browser)
 - [ ] MATLAB integration
 - [ ] Excel plugin
