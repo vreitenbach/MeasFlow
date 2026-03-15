@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  csharp:
+    name: C# (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - run: dotnet restore
+        working-directory: csharp
+      - run: dotnet build --no-restore -c Release
+        working-directory: csharp
+      - run: dotnet test --no-build -c Release --verbosity normal
+        working-directory: csharp
+
+  generate-demo:
+    name: Generate demo file
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - run: dotnet run -c Release --project csharp/tools/MeasFlow.DemoGenerator -- demo_measurement.meas
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo-measurement
+          path: demo_measurement.meas
+
+  python:
+    name: Python (${{ matrix.python }}, ${{ matrix.os }})
+    needs: generate-demo
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: demo-measurement
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e ".[dev]"
+        working-directory: python
+      - run: pytest -v
+        working-directory: python
+
+  c:
+    name: C (${{ matrix.os }})
+    needs: generate-demo
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: demo-measurement
+      - name: Install vcpkg dependencies
+        shell: bash
+        run: vcpkg install lz4 zstd
+      - name: Configure
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmake -B build -S c -G "Visual Studio 17 2022" -DMEAS_BUILD_TESTS=ON \
+              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          else
+            cmake -B build -S c -DMEAS_BUILD_TESTS=ON \
+              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          fi
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test (Linux)
+        if: runner.os == 'Linux'
+        run: ./build/test_measflow
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        run: ./build/Release/test_measflow.exe

@@ -1,0 +1,36 @@
+{
+  "name": "measflow",
+  "version": "1.0.0",
+  "description": "High-performance binary measurement data format — C reader/writer library",
+  "homepage": "https://github.com/vreitenbach/MeasFlow",
+  "license": "MIT",
+  "supports": "!uwp",
+  "dependencies": [
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    },
+    {
+      "name": "vcpkg-cmake-config",
+      "host": true
+    }
+  ],
+  "features": {
+    "lz4": {
+      "description": "LZ4 compression support for data segments",
+      "dependencies": ["lz4"]
+    },
+    "zstd": {
+      "description": "Zstd compression support for data segments",
+      "dependencies": ["zstd"]
+    },
+    "compression": {
+      "description": "All compression algorithms (LZ4 + Zstd)",
+      "dependencies": [
+        { "name": "measflow", "features": ["lz4"] },
+        { "name": "measflow", "features": ["zstd"] }
+      ]
+    }
+  },
+  "default-features": ["compression"]
+}

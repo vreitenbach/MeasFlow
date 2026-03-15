@@ -9,10 +9,31 @@ description = "Python reader/writer for the MeasFlow (.meas) binary measurement 
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+authors = [{ name = "vreitenbach" }]
+keywords = ["measurement", "binary", "streaming", "lz4", "zstd", "can", "lin", "flexray", "automotive"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = ["numpy>=1.24"]
 
+[project.urls]
+Homepage = "https://github.com/vreitenbach/MeasFlow"
+Repository = "https://github.com/vreitenbach/MeasFlow"
+Issues = "https://github.com/vreitenbach/MeasFlow/issues"
+
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+compression = ["lz4>=4.0", "zstandard>=0.20"]
+dev = ["pytest>=7.0", "lz4>=4.0", "zstandard>=0.20"]
 
 [tool.setuptools.packages.find]
 include = ["measflow*"]

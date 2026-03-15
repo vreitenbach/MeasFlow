@@ -814,15 +814,318 @@ static void test_bus_def_group_property(void) {
     PASS();
 }
 
+/* ── Compression tests ──────────────────────────────────────────────────── */
+
+static void test_compression_api(void) {
+    TEST("compression_api");
+    const char *path = tmp_file("comp_api.meas");
+
+    MeasWriter *w = meas_writer_open(path);
+    ASSERT(w != NULL);
+
+    /* NONE is always supported */
+    ASSERT_EQ_INT(meas_writer_set_compression(w, MEAS_COMPRESS_NONE), 0);
+
+#ifdef MEAS_HAVE_LZ4
+    ASSERT_EQ_INT(meas_writer_set_compression(w, MEAS_COMPRESS_LZ4), 0);
+#else
+    ASSERT_EQ_INT(meas_writer_set_compression(w, MEAS_COMPRESS_LZ4), -1);
+#endif
+
+#ifdef MEAS_HAVE_ZSTD
+    ASSERT_EQ_INT(meas_writer_set_compression(w, MEAS_COMPRESS_ZSTD), 0);
+#else
+    ASSERT_EQ_INT(meas_writer_set_compression(w, MEAS_COMPRESS_ZSTD), -1);
+#endif
+
+    /* NULL writer */
+    ASSERT_EQ_INT(meas_writer_set_compression(NULL, MEAS_COMPRESS_NONE), -1);
+
+    meas_writer_close(w);
+    PASS();
+}
+
+#ifdef MEAS_HAVE_LZ4
+static void test_lz4_roundtrip(void) {
+    TEST("lz4_roundtrip");
+    const char *path = tmp_file("lz4.meas");
+
+    double input[] = {1.0, 2.5, -3.14, 0.0, 1e6};
+    int N = 5;
+
+    MeasWriter *w = meas_writer_open(path);
+    ASSERT(w != NULL);
+    ASSERT_EQ_INT(meas_writer_set_compression(w, MEAS_COMPRESS_LZ4), 0);
+    MeasGroupWriter *g = meas_writer_add_group(w, "Sensors");
+    MeasChannelWriter *ch = meas_group_add_channel(g, "Voltage", MEAS_FLOAT64);
+    ASSERT_EQ_INT(meas_channel_write_f64(ch, input, N), 0);
+    meas_writer_close(w);
+
+    MeasReader *r = meas_reader_open(path);
+    ASSERT(r != NULL);
+    ASSERT_EQ_INT(meas_reader_group_count(r), 1);
+    const MeasChannelData *rch =
+        meas_group_channel_by_name(meas_reader_group(r, 0), "Voltage");
+    ASSERT(rch != NULL);
+    ASSERT_EQ_INT(rch->sample_count, N);
+
+    double out[5];
+    ASSERT_EQ_INT(meas_channel_read_f64(rch, out, N), N);
+    for (int i = 0; i < N; i++) ASSERT_NEAR(out[i], input[i], 1e-12);
+
+    meas_reader_close(r);
+    PASS();
+}
+
+static void test_lz4_incremental_flush(void) {
+    TEST("lz4_incremental_flush");
+    const char *path = tmp_file("lz4_inc.meas");
+
+    MeasWriter *w = meas_writer_open(path);
+    ASSERT(w != NULL);
+    ASSERT_EQ_INT(meas_writer_set_compression(w, MEAS_COMPRESS_LZ4), 0);
+    MeasGroupWriter *g = meas_writer_add_group(w, "Stream");
+    MeasChannelWriter *ch = meas_group_add_channel(g, "Signal", MEAS_FLOAT32);
+
+    float batch1[] = {1.0f, 2.0f, 3.0f};
+    float batch2[] = {4.0f, 5.0f};
+    ASSERT_EQ_INT(meas_channel_write_f32(ch, batch1, 3), 0);
+    ASSERT_EQ_INT(meas_writer_flush(w), 0);
+    ASSERT_EQ_INT(meas_channel_write_f32(ch, batch2, 2), 0);
+    meas_writer_close(w);
+
+    MeasReader *r = meas_reader_open(path);
+    ASSERT(r != NULL);
+    const MeasChannelData *rch =
+        meas_group_channel_by_name(meas_reader_group(r, 0), "Signal");
+    ASSERT(rch != NULL);
+    ASSERT_EQ_INT(rch->sample_count, 5);
+
+    float out[5];
+    ASSERT_EQ_INT(meas_channel_read_f32(rch, out, 5), 5);
+    for (int i = 0; i < 5; i++) ASSERT_NEAR(out[i], (float)(i + 1), 1e-6f);
+
+    meas_reader_close(r);
+    PASS();
+}
+
+static void test_lz4_statistics(void) {
+    TEST("lz4_statistics");
+    const char *path = tmp_file("lz4_stats.meas");
+
+    double vals[] = {10.0, 20.0, 30.0, 40.0, 50.0};
+
+    MeasWriter *w = meas_writer_open(path);
+    ASSERT(w != NULL);
+    ASSERT_EQ_INT(meas_writer_set_compression(w, MEAS_COMPRESS_LZ4), 0);
+    MeasGroupWriter *g = meas_writer_add_group(w, "S");
+    MeasChannelWriter *ch = meas_group_add_channel(g, "V", MEAS_FLOAT64);
+    ASSERT_EQ_INT(meas_channel_write_f64(ch, vals, 5), 0);
+    meas_writer_close(w);
+
+    MeasReader *r = meas_reader_open(path);
+    ASSERT(r != NULL);
+    const MeasChannelData *rch =
+        meas_group_channel_by_name(meas_reader_group(r, 0), "V");
+    ASSERT(rch != NULL);
+    ASSERT(rch->has_stats);
+    ASSERT_EQ_INT(rch->stats.count, 5);
+    ASSERT_NEAR(rch->stats.min,  10.0, 1e-9);
+    ASSERT_NEAR(rch->stats.max,  50.0, 1e-9);
+    ASSERT_NEAR(rch->stats.mean, 30.0, 1e-9);
+    ASSERT_NEAR(rch->stats.variance, 200.0, 1e-6);
+
+    meas_reader_close(r);
+    PASS();
+}
+
+static void test_lz4_binary_frames(void) {
+    TEST("lz4_binary_frames");
+    const char *path = tmp_file("lz4_bin.meas");
+
+    uint8_t f0[] = {0x01, 0x02, 0x03};
+    uint8_t f1[] = {0xAA, 0xBB};
+
+    MeasWriter *w = meas_writer_open(path);
+    ASSERT(w != NULL);
+    ASSERT_EQ_INT(meas_writer_set_compression(w, MEAS_COMPRESS_LZ4), 0);
+    MeasGroupWriter *g = meas_writer_add_group(w, "Bus");
+    MeasChannelWriter *ch = meas_group_add_channel(g, "Frames", MEAS_BINARY);
+    ASSERT_EQ_INT(meas_channel_write_frame(ch, f0, 3), 0);
+    ASSERT_EQ_INT(meas_channel_write_frame(ch, f1, 2), 0);
+    meas_writer_close(w);
+
+    MeasReader *r = meas_reader_open(path);
+    ASSERT(r != NULL);
+    const MeasChannelData *rch =
+        meas_group_channel_by_name(meas_reader_group(r, 0), "Frames");
+    ASSERT(rch != NULL);
+    ASSERT_EQ_INT(rch->sample_count, 2);
+
+    int64_t state = 0;
+    const uint8_t *fd; int32_t fl;
+    ASSERT_EQ_INT(meas_channel_next_frame(rch, &state, &fd, &fl), 1);
+    ASSERT_EQ_INT(fl, 3);
+    ASSERT_EQ_INT(memcmp(fd, f0, 3), 0);
+    ASSERT_EQ_INT(meas_channel_next_frame(rch, &state, &fd, &fl), 1);
+    ASSERT_EQ_INT(fl, 2);
+    ASSERT_EQ_INT(memcmp(fd, f1, 2), 0);
+    ASSERT_EQ_INT(meas_channel_next_frame(rch, &state, &fd, &fl), 0);
+
+    meas_reader_close(r);
+    PASS();
+}
+#endif /* MEAS_HAVE_LZ4 */
+
+#ifdef MEAS_HAVE_ZSTD
+static void test_zstd_roundtrip(void) {
+    TEST("zstd_roundtrip");
+    const char *path = tmp_file("zstd.meas");
+
+    double input[] = {1.0, 2.5, -3.14, 0.0, 1e6};
+    int N = 5;
+
+    MeasWriter *w = meas_writer_open(path);
+    ASSERT(w != NULL);
+    ASSERT_EQ_INT(meas_writer_set_compression(w, MEAS_COMPRESS_ZSTD), 0);
+    MeasGroupWriter *g = meas_writer_add_group(w, "Sensors");
+    MeasChannelWriter *ch = meas_group_add_channel(g, "Voltage", MEAS_FLOAT64);
+    ASSERT_EQ_INT(meas_channel_write_f64(ch, input, N), 0);
+    meas_writer_close(w);
+
+    MeasReader *r = meas_reader_open(path);
+    ASSERT(r != NULL);
+    ASSERT_EQ_INT(meas_reader_group_count(r), 1);
+    const MeasChannelData *rch =
+        meas_group_channel_by_name(meas_reader_group(r, 0), "Voltage");
+    ASSERT(rch != NULL);
+    ASSERT_EQ_INT(rch->sample_count, N);
+
+    double out[5];
+    ASSERT_EQ_INT(meas_channel_read_f64(rch, out, N), N);
+    for (int i = 0; i < N; i++) ASSERT_NEAR(out[i], input[i], 1e-12);
+
+    meas_reader_close(r);
+    PASS();
+}
+
+static void test_zstd_incremental_flush(void) {
+    TEST("zstd_incremental_flush");
+    const char *path = tmp_file("zstd_inc.meas");
+
+    MeasWriter *w = meas_writer_open(path);
+    ASSERT(w != NULL);
+    ASSERT_EQ_INT(meas_writer_set_compression(w, MEAS_COMPRESS_ZSTD), 0);
+    MeasGroupWriter *g = meas_writer_add_group(w, "Stream");
+    MeasChannelWriter *ch = meas_group_add_channel(g, "Signal", MEAS_FLOAT32);
+
+    float batch1[] = {1.0f, 2.0f, 3.0f};
+    float batch2[] = {4.0f, 5.0f};
+    ASSERT_EQ_INT(meas_channel_write_f32(ch, batch1, 3), 0);
+    ASSERT_EQ_INT(meas_writer_flush(w), 0);
+    ASSERT_EQ_INT(meas_channel_write_f32(ch, batch2, 2), 0);
+    meas_writer_close(w);
+
+    MeasReader *r = meas_reader_open(path);
+    ASSERT(r != NULL);
+    const MeasChannelData *rch =
+        meas_group_channel_by_name(meas_reader_group(r, 0), "Signal");
+    ASSERT(rch != NULL);
+    ASSERT_EQ_INT(rch->sample_count, 5);
+
+    float out[5];
+    ASSERT_EQ_INT(meas_channel_read_f32(rch, out, 5), 5);
+    for (int i = 0; i < 5; i++) ASSERT_NEAR(out[i], (float)(i + 1), 1e-6f);
+
+    meas_reader_close(r);
+    PASS();
+}
+
+static void test_zstd_statistics(void) {
+    TEST("zstd_statistics");
+    const char *path = tmp_file("zstd_stats.meas");
+
+    double vals[] = {10.0, 20.0, 30.0, 40.0, 50.0};
+
+    MeasWriter *w = meas_writer_open(path);
+    ASSERT(w != NULL);
+    ASSERT_EQ_INT(meas_writer_set_compression(w, MEAS_COMPRESS_ZSTD), 0);
+    MeasGroupWriter *g = meas_writer_add_group(w, "S");
+    MeasChannelWriter *ch = meas_group_add_channel(g, "V", MEAS_FLOAT64);
+    ASSERT_EQ_INT(meas_channel_write_f64(ch, vals, 5), 0);
+    meas_writer_close(w);
+
+    MeasReader *r = meas_reader_open(path);
+    ASSERT(r != NULL);
+    const MeasChannelData *rch =
+        meas_group_channel_by_name(meas_reader_group(r, 0), "V");
+    ASSERT(rch != NULL);
+    ASSERT(rch->has_stats);
+    ASSERT_EQ_INT(rch->stats.count, 5);
+    ASSERT_NEAR(rch->stats.min,  10.0, 1e-9);
+    ASSERT_NEAR(rch->stats.max,  50.0, 1e-9);
+    ASSERT_NEAR(rch->stats.mean, 30.0, 1e-9);
+    ASSERT_NEAR(rch->stats.variance, 200.0, 1e-6);
+
+    meas_reader_close(r);
+    PASS();
+}
+
+static void test_zstd_binary_frames(void) {
+    TEST("zstd_binary_frames");
+    const char *path = tmp_file("zstd_bin.meas");
+
+    uint8_t f0[] = {0x01, 0x02, 0x03};
+    uint8_t f1[] = {0xAA, 0xBB};
+
+    MeasWriter *w = meas_writer_open(path);
+    ASSERT(w != NULL);
+    ASSERT_EQ_INT(meas_writer_set_compression(w, MEAS_COMPRESS_ZSTD), 0);
+    MeasGroupWriter *g = meas_writer_add_group(w, "Bus");
+    MeasChannelWriter *ch = meas_group_add_channel(g, "Frames", MEAS_BINARY);
+    ASSERT_EQ_INT(meas_channel_write_frame(ch, f0, 3), 0);
+    ASSERT_EQ_INT(meas_channel_write_frame(ch, f1, 2), 0);
+    meas_writer_close(w);
+
+    MeasReader *r = meas_reader_open(path);
+    ASSERT(r != NULL);
+    const MeasChannelData *rch =
+        meas_group_channel_by_name(meas_reader_group(r, 0), "Frames");
+    ASSERT(rch != NULL);
+    ASSERT_EQ_INT(rch->sample_count, 2);
+
+    int64_t state = 0;
+    const uint8_t *fd; int32_t fl;
+    ASSERT_EQ_INT(meas_channel_next_frame(rch, &state, &fd, &fl), 1);
+    ASSERT_EQ_INT(fl, 3);
+    ASSERT_EQ_INT(memcmp(fd, f0, 3), 0);
+    ASSERT_EQ_INT(meas_channel_next_frame(rch, &state, &fd, &fl), 1);
+    ASSERT_EQ_INT(fl, 2);
+    ASSERT_EQ_INT(memcmp(fd, f1, 2), 0);
+    ASSERT_EQ_INT(meas_channel_next_frame(rch, &state, &fd, &fl), 0);
+
+    meas_reader_close(r);
+    PASS();
+}
+#endif /* MEAS_HAVE_ZSTD */
+
 static void test_cross_language_read(void) {
     TEST("cross_language_read_demo_file");
     /* Try to open the demo measurement file written by the C# implementation.
        This is an integration test that verifies cross-language compatibility.
        Skip gracefully if the file is not present. */
-    const char *demo = "../../demo_measurement.meas";
-    MeasReader *r = meas_reader_open(demo);
+    const char *paths[] = {
+        "demo_measurement.meas",           /* CWD = repo root (CI) */
+        "../../demo_measurement.meas",     /* CWD = c/build (local) */
+        "../demo_measurement.meas",        /* CWD = c/ */
+    };
+    MeasReader *r = NULL;
+    for (int i = 0; i < 3; i++) {
+        r = meas_reader_open(paths[i]);
+        if (r) break;
+    }
     if (!r) {
-        printf("  [SKIP] demo_measurement.meas not found at %s\n", demo);
+        printf("  [SKIP] demo_measurement.meas not found\n");
         g_passed++;  /* count as passed since it's an optional test */
         return;
     }
@@ -855,6 +1158,19 @@ int main(void) {
     test_ethernet_frame_write_read();
     test_bus_metadata_encode_decode();
     test_bus_def_group_property();
+    test_compression_api();
+#ifdef MEAS_HAVE_LZ4
+    test_lz4_roundtrip();
+    test_lz4_incremental_flush();
+    test_lz4_statistics();
+    test_lz4_binary_frames();
+#endif
+#ifdef MEAS_HAVE_ZSTD
+    test_zstd_roundtrip();
+    test_zstd_incremental_flush();
+    test_zstd_statistics();
+    test_zstd_binary_frames();
+#endif
     test_cross_language_read();
 
     printf("\n%d/%d tests passed", g_passed, g_tests);

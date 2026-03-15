@@ -9,7 +9,7 @@
 - [x] AUTOSAR: PDU/ContainedPdu/Mux/E2E/SecOC
 - [x] Signal decoding (Intel/Motorola byte order)
 - [x] Performance benchmarks (BenchmarkDotNet)
-- [ ] Compression (LZ4/Zstd segments)
+- [x] Compression (LZ4/Zstd segments)
 - [ ] Memory-mapped I/O for large files
 
 ## Cross-Language Implementations
@@ -28,9 +28,18 @@
 - [ ] MATLAB integration
 - [ ] Excel plugin
 
+## CI/CD
+
+- [x] CI workflow (C#, Python, C — Linux + Windows matrix)
+- [x] Release workflow (NuGet, PyPI, vcpkg registry, GitHub Release on tag push)
+
 ## Publishing
 
-- [ ] NuGet package release for C#
-- [ ] PyPI release for Python
-- [ ] Vcpkg release for C
+- [x] NuGet package metadata (csproj ready, `dotnet pack` works)
+- [x] PyPI package metadata (pyproject.toml ready, `python -m build` works)
+- [x] Vcpkg port files prepared (c/port/)
+- [x] Third-party license notices (THIRD-PARTY-NOTICES.md)
+- [ ] NuGet publish to nuget.org
+- [ ] PyPI publish to pypi.org
+- [x] Vcpkg custom registry (vreitenbach/vcpkg-registry, auto-updated on release)
 
