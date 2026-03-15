@@ -298,10 +298,9 @@ public sealed class GroupWriter
 
     /// <summary>
     /// Add a signal channel that is decoded from a raw source channel.
-    /// </summary>
-    [Obsolete("Use MeasWriter.AddBusGroup() with structured frame/signal definitions instead.")]
     /// The source relationship is stored as a property for traceability.
     /// </summary>
+    [Obsolete("Use MeasWriter.AddBusGroup() with structured frame/signal definitions instead.")]
     public ChannelWriter<T> AddSignalChannel<T>(string name, string sourceChannelName,
         int startBit = -1, int bitLength = -1, double factor = 1.0, double offset = 0.0)
         where T : unmanaged
