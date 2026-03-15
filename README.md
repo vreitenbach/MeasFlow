@@ -185,6 +185,7 @@ csharp/                       C# (.NET 10) implementation
   samples/QuickStart/           Runnable C# quickstart
   benchmarks/                   BenchmarkDotNet performance tests
   tools/MeasFlow.Viewer/        Avalonia-based data viewer
+  tools/MeasFlow.DemoGenerator/ Cross-language test data generator
 python/                       Python (≥ 3.10) implementation
   measflow/                     Package source
   tests/                        Pytest test suite
@@ -197,13 +198,14 @@ c/                            C (C99) implementation
 
 ## Roadmap
 
-- [ ] Performance benchmarks vs TDMS/HDF5/MDF4
-- [ ] Data viewer (signal plots, frame browser)
+- [ ] Rust reader/writer
+- [ ] Memory-mapped I/O for large files
+- [ ] Performance comparison vs TDMS/HDF5/MDF4
+- [ ] DBC/ARXML import
 - [ ] MATLAB integration
 - [ ] Excel plugin
-- [ ] Compression (LZ4/Zstd)
-- [ ] Memory-mapped I/O for large files
-- [ ] DBC/ARXML import
+- [ ] NuGet publish to nuget.org
+- [ ] PyPI publish to pypi.org
 
 ## License
 
