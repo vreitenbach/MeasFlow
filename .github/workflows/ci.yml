@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  csharp:
+    name: C# (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - run: dotnet restore
+        working-directory: csharp
+      - run: dotnet build --no-restore -c Release
+        working-directory: csharp
+      - run: dotnet test --no-build -c Release --verbosity normal
+        working-directory: csharp
+
+  python:
+    name: Python (${{ matrix.python }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e ".[dev]"
+        working-directory: python
+      - run: pytest -v
+        working-directory: python
+
+  c:
+    name: C (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install vcpkg dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liblz4-dev libzstd-dev
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: cmake -B build -S c -DMEAS_BUILD_TESTS=ON
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: cmake -B build -S c -DMEAS_BUILD_TESTS=ON -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test (Linux)
+        if: runner.os == 'Linux'
+        run: ./build/test_measflow
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        run: ./build/Release/test_measflow.exe

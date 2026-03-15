@@ -28,6 +28,11 @@
 - [ ] MATLAB integration
 - [ ] Excel plugin
 
+## CI/CD
+
+- [x] CI workflow (C#, Python, C — Linux + Windows matrix)
+- [x] Release workflow (NuGet, PyPI, GitHub Release on tag push)
+
 ## Publishing
 
 - [x] NuGet package metadata (csproj ready, `dotnet pack` works)
