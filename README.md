@@ -8,6 +8,7 @@ Open, high-performance measurement data format with multi-language support. Simp
 
 [![NuGet](https://img.shields.io/nuget/v/MeasFlow)](https://www.nuget.org/packages/MeasFlow)
 [![PyPI](https://img.shields.io/pypi/v/measflow)](https://pypi.org/project/measflow/)
+[![vcpkg](https://img.shields.io/badge/vcpkg-registry-blue)](https://github.com/vreitenbach/vcpkg-registry)
 [![CI](https://github.com/vreitenbach/MeasFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/vreitenbach/MeasFlow/actions/workflows/ci.yml)
 
 ## Why?
