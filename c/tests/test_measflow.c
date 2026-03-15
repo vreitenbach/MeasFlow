@@ -494,6 +494,326 @@ static void test_string_channel(void) {
     PASS();
 }
 
+static void test_can_frame_write_read(void) {
+    TEST("can_frame_write_read");
+    const char *path = tmp_file("can.meas");
+
+    MeasWriter *w = meas_writer_open(path);
+    ASSERT(w != NULL);
+    MeasGroupWriter *g = meas_writer_add_group(w, "CAN1");
+    MeasChannelWriter *ch = meas_group_add_channel(g, "Frames", MEAS_BINARY);
+
+    /* Standard CAN frame (11-bit id, 8 bytes) */
+    MeasCanFrame f0 = {0};
+    f0.arb_id = 0x1A2;
+    f0.dlc    = 3;
+    f0.flags  = 0; /* no BRS, no ESI, standard ID */
+    f0.payload[0] = 0x11; f0.payload[1] = 0x22; f0.payload[2] = 0x33;
+    ASSERT_EQ_INT(meas_channel_write_can_frame(ch, &f0), 0);
+
+    /* CAN-FD frame (29-bit ext id, BRS, 12 bytes) */
+    MeasCanFrame f1 = {0};
+    f1.arb_id = 0x1FEDCBA;
+    f1.dlc    = 4;
+    f1.flags  = 0x05; /* BRS=1, ExtendedId=1 */
+    f1.payload[0] = 0xAA; f1.payload[1] = 0xBB; f1.payload[2] = 0xCC; f1.payload[3] = 0xDD;
+    ASSERT_EQ_INT(meas_channel_write_can_frame(ch, &f1), 0);
+
+    meas_writer_close(w);
+
+    MeasReader *r = meas_reader_open(path);
+    ASSERT(r != NULL);
+    const MeasChannelData *rch = meas_group_channel_by_name(meas_reader_group(r, 0), "Frames");
+    ASSERT(rch != NULL);
+    ASSERT_EQ_INT(rch->sample_count, 2);
+
+    int64_t state = 0;
+    MeasCanFrame out;
+
+    ASSERT_EQ_INT(meas_channel_next_can_frame(rch, &state, &out), 1);
+    ASSERT_EQ_INT((int)out.arb_id, 0x1A2);
+    ASSERT_EQ_INT(out.dlc,  3);
+    ASSERT_EQ_INT(out.flags, 0);
+    ASSERT_EQ_INT(out.payload[0], 0x11);
+    ASSERT_EQ_INT(out.payload[2], 0x33);
+
+    ASSERT_EQ_INT(meas_channel_next_can_frame(rch, &state, &out), 1);
+    ASSERT_EQ_INT((int)out.arb_id, 0x1FEDCBA);
+    ASSERT_EQ_INT(out.dlc,  4);
+    ASSERT_EQ_INT(out.flags, 0x05);
+    ASSERT_EQ_INT(out.payload[0], 0xAA);
+    ASSERT_EQ_INT(out.payload[3], 0xDD);
+
+    ASSERT_EQ_INT(meas_channel_next_can_frame(rch, &state, &out), 0); /* exhausted */
+
+    meas_reader_close(r);
+    PASS();
+}
+
+static void test_lin_frame_write_read(void) {
+    TEST("lin_frame_write_read");
+    const char *path = tmp_file("lin.meas");
+
+    MeasWriter *w = meas_writer_open(path);
+    ASSERT(w != NULL);
+    MeasGroupWriter *g = meas_writer_add_group(w, "LIN1");
+    MeasChannelWriter *ch = meas_group_add_channel(g, "Frames", MEAS_BINARY);
+
+    MeasLinFrame f = {0};
+    f.frame_id     = 0x12;
+    f.dlc          = 4;
+    f.nad          = 0x7F;
+    f.checksum_type = 1; /* Enhanced */
+    f.payload[0] = 0x01; f.payload[1] = 0x02; f.payload[2] = 0x03; f.payload[3] = 0x04;
+    ASSERT_EQ_INT(meas_channel_write_lin_frame(ch, &f), 0);
+
+    meas_writer_close(w);
+
+    MeasReader *r = meas_reader_open(path);
+    ASSERT(r != NULL);
+    const MeasChannelData *rch = meas_group_channel_by_name(meas_reader_group(r, 0), "Frames");
+    ASSERT(rch != NULL);
+    ASSERT_EQ_INT(rch->sample_count, 1);
+
+    int64_t state = 0;
+    MeasLinFrame out;
+    ASSERT_EQ_INT(meas_channel_next_lin_frame(rch, &state, &out), 1);
+    ASSERT_EQ_INT(out.frame_id, 0x12);
+    ASSERT_EQ_INT(out.dlc,      4);
+    ASSERT_EQ_INT(out.nad,      0x7F);
+    ASSERT_EQ_INT(out.checksum_type, 1);
+    ASSERT_EQ_INT(out.payload[0], 0x01);
+    ASSERT_EQ_INT(out.payload[3], 0x04);
+    ASSERT_EQ_INT(meas_channel_next_lin_frame(rch, &state, &out), 0);
+
+    meas_reader_close(r);
+    PASS();
+}
+
+static void test_flexray_frame_write_read(void) {
+    TEST("flexray_frame_write_read");
+    const char *path = tmp_file("flexray.meas");
+
+    uint8_t fr_payload[8] = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80};
+
+    MeasWriter *w = meas_writer_open(path);
+    ASSERT(w != NULL);
+    MeasGroupWriter *g = meas_writer_add_group(w, "FR1");
+    MeasChannelWriter *ch = meas_group_add_channel(g, "Frames", MEAS_BINARY);
+
+    MeasFlexRayFrame f = {0};
+    f.slot_id         = 17;
+    f.cycle_count     = 3;
+    f.channel_flags   = 0x01; /* ChA */
+    f.payload_length  = 8;
+    f.payload         = fr_payload;
+    ASSERT_EQ_INT(meas_channel_write_flexray_frame(ch, &f), 0);
+
+    meas_writer_close(w);
+
+    MeasReader *r = meas_reader_open(path);
+    ASSERT(r != NULL);
+    const MeasChannelData *rch = meas_group_channel_by_name(meas_reader_group(r, 0), "Frames");
+    ASSERT(rch != NULL);
+    ASSERT_EQ_INT(rch->sample_count, 1);
+
+    int64_t state = 0;
+    MeasFlexRayFrame out;
+    ASSERT_EQ_INT(meas_channel_next_flexray_frame(rch, &state, &out), 1);
+    ASSERT_EQ_INT(out.slot_id,        17);
+    ASSERT_EQ_INT(out.cycle_count,    3);
+    ASSERT_EQ_INT(out.channel_flags,  0x01);
+    ASSERT_EQ_INT(out.payload_length, 8);
+    ASSERT(out.payload != NULL);
+    ASSERT_EQ_INT(out.payload[0], 0x10);
+    ASSERT_EQ_INT(out.payload[7], 0x80);
+    ASSERT_EQ_INT(meas_channel_next_flexray_frame(rch, &state, &out), 0);
+
+    meas_reader_close(r);
+    PASS();
+}
+
+static void test_ethernet_frame_write_read(void) {
+    TEST("ethernet_frame_write_read");
+    const char *path = tmp_file("eth.meas");
+
+    uint8_t eth_payload[] = {0xDE, 0xAD, 0xBE, 0xEF};
+    uint8_t mac_d[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    uint8_t mac_s[6] = {0x00, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E};
+
+    MeasWriter *w = meas_writer_open(path);
+    ASSERT(w != NULL);
+    MeasGroupWriter *g = meas_writer_add_group(w, "ETH0");
+    MeasChannelWriter *ch = meas_group_add_channel(g, "Frames", MEAS_BINARY);
+
+    MeasEthernetFrame f = {0};
+    memcpy(f.mac_dest, mac_d, 6);
+    memcpy(f.mac_src,  mac_s, 6);
+    f.ether_type    = 0x0800; /* IPv4 */
+    f.vlan_id       = 100;
+    f.payload_length = 4;
+    f.payload        = eth_payload;
+    ASSERT_EQ_INT(meas_channel_write_ethernet_frame(ch, &f), 0);
+
+    meas_writer_close(w);
+
+    MeasReader *r = meas_reader_open(path);
+    ASSERT(r != NULL);
+    const MeasChannelData *rch = meas_group_channel_by_name(meas_reader_group(r, 0), "Frames");
+    ASSERT(rch != NULL);
+    ASSERT_EQ_INT(rch->sample_count, 1);
+
+    int64_t state = 0;
+    MeasEthernetFrame out;
+    ASSERT_EQ_INT(meas_channel_next_ethernet_frame(rch, &state, &out), 1);
+    ASSERT_EQ_INT(memcmp(out.mac_dest, mac_d, 6), 0);
+    ASSERT_EQ_INT(memcmp(out.mac_src,  mac_s, 6), 0);
+    ASSERT_EQ_INT(out.ether_type,     0x0800);
+    ASSERT_EQ_INT(out.vlan_id,        100);
+    ASSERT_EQ_INT(out.payload_length, 4);
+    ASSERT(out.payload != NULL);
+    ASSERT_EQ_INT(out.payload[0], 0xDE);
+    ASSERT_EQ_INT(out.payload[3], 0xEF);
+    ASSERT_EQ_INT(meas_channel_next_ethernet_frame(rch, &state, &out), 0);
+
+    meas_reader_close(r);
+    PASS();
+}
+
+static void test_bus_metadata_encode_decode(void) {
+    TEST("bus_metadata_encode_decode");
+
+    /* Build a CAN BusMetadata with one frame and one signal (no PDUs) */
+    MeasValueDescription vdescs[2] = {
+        { 0, "Off" },
+        { 1, "On"  },
+    };
+    MeasSignalDefinition sig = {0};
+    sig.name            = "EngineOn";
+    sig.start_bit       = 0;
+    sig.bit_length      = 1;
+    sig.byte_order      = 0; /* Intel */
+    sig.signal_type     = 0; /* Unsigned */
+    sig.factor          = 1.0;
+    sig.offset          = 0.0;
+    sig.min_max_flags   = 0x03; /* hasMin, hasMax */
+    sig.min_value       = 0.0;
+    sig.max_value       = 1.0;
+    sig.has_unit        = 0;
+    sig.value_desc_count = 2;
+    sig.value_descs     = vdescs;
+
+    MeasFrameDefinition frame = {0};
+    frame.name           = "EngineStatus";
+    frame.frame_id       = 0x100;
+    frame.payload_length = 8;
+    frame.direction      = 0; /* Rx */
+    frame.flags          = 0;
+    frame.bus.can.is_extended_id = 0;
+    frame.signal_count   = 1;
+    frame.signals        = &sig;
+
+    MeasValueTableEntry vte[2] = { {0, "Off"}, {1, "On"} };
+    MeasValueTable vt = { "OnOff", 2, vte };
+
+    MeasBusMetadata meta = {0};
+    meta.format_version           = 1;
+    meta.bus_config.bus_type      = MEAS_BUS_CAN;
+    meta.bus_config.u.can.is_extended_id = 0;
+    meta.bus_config.u.can.baud_rate      = 500000;
+    meta.raw_frame_channel_name   = "Frames";
+    meta.timestamp_channel_name   = "Timestamps";
+    meta.frame_count              = 1;
+    meta.frames                   = &frame;
+    meta.value_table_count        = 1;
+    meta.value_tables             = &vt;
+
+    /* Encode */
+    uint8_t *blob = NULL; int32_t blen = 0;
+    ASSERT_EQ_INT(meas_bus_metadata_encode(&meta, &blob, &blen), 0);
+    ASSERT(blob != NULL);
+    ASSERT(blen > 0);
+
+    /* Decode */
+    MeasBusMetadata *decoded = NULL;
+    ASSERT_EQ_INT(meas_bus_metadata_decode(blob, blen, &decoded), 0);
+    ASSERT(decoded != NULL);
+
+    /* Verify round-trip */
+    ASSERT_EQ_INT(decoded->format_version, 1);
+    ASSERT_EQ_INT(decoded->bus_config.bus_type,           MEAS_BUS_CAN);
+    ASSERT_EQ_INT(decoded->bus_config.u.can.baud_rate,    500000);
+    ASSERT(strcmp(decoded->raw_frame_channel_name, "Frames")     == 0);
+    ASSERT(strcmp(decoded->timestamp_channel_name, "Timestamps") == 0);
+    ASSERT_EQ_INT(decoded->frame_count, 1);
+    ASSERT(decoded->frames != NULL);
+    ASSERT(strcmp(decoded->frames[0].name, "EngineStatus") == 0);
+    ASSERT_EQ_INT((int)decoded->frames[0].frame_id,    0x100);
+    ASSERT_EQ_INT(decoded->frames[0].signal_count,    1);
+    ASSERT(strcmp(decoded->frames[0].signals[0].name, "EngineOn") == 0);
+    ASSERT_EQ_INT(decoded->frames[0].signals[0].start_bit,  0);
+    ASSERT_EQ_INT(decoded->frames[0].signals[0].bit_length, 1);
+    ASSERT_NEAR  (decoded->frames[0].signals[0].factor, 1.0, 1e-12);
+    ASSERT_EQ_INT(decoded->frames[0].signals[0].value_desc_count, 2);
+    ASSERT(strcmp(decoded->frames[0].signals[0].value_descs[0].description, "Off") == 0);
+    ASSERT(strcmp(decoded->frames[0].signals[0].value_descs[1].description, "On")  == 0);
+    ASSERT_EQ_INT(decoded->value_table_count, 1);
+    ASSERT(strcmp(decoded->value_tables[0].name, "OnOff") == 0);
+    ASSERT_EQ_INT(decoded->value_tables[0].entry_count, 2);
+
+    free(blob);
+    meas_bus_metadata_free(decoded);
+    PASS();
+}
+
+static void test_bus_def_group_property(void) {
+    TEST("bus_def_group_property");
+    const char *path = tmp_file("busdef.meas");
+
+    /* Build a minimal LIN BusMetadata */
+    MeasBusMetadata meta = {0};
+    meta.format_version              = 1;
+    meta.bus_config.bus_type         = MEAS_BUS_LIN;
+    meta.bus_config.u.lin.baud_rate  = 19200;
+    meta.bus_config.u.lin.lin_version = 2;
+    meta.raw_frame_channel_name      = "LinFrames";
+    meta.timestamp_channel_name      = "LinTimes";
+
+    MeasWriter *w = meas_writer_open(path);
+    ASSERT(w != NULL);
+    MeasGroupWriter *g = meas_writer_add_group(w, "LIN_BUS1");
+
+    /* Attach bus metadata to the group */
+    ASSERT_EQ_INT(meas_group_set_bus_def(g, &meta), 0);
+
+    MeasChannelWriter *ch = meas_group_add_channel(g, "LinFrames", MEAS_BINARY);
+    MeasLinFrame lf = {0};
+    lf.frame_id = 0x3C; lf.dlc = 2;
+    lf.payload[0] = 0xAB; lf.payload[1] = 0xCD;
+    ASSERT_EQ_INT(meas_channel_write_lin_frame(ch, &lf), 0);
+
+    meas_writer_close(w);
+
+    /* Read back and verify bus_def property */
+    MeasReader *r = meas_reader_open(path);
+    ASSERT(r != NULL);
+    const MeasGroupData *rg = meas_reader_group_by_name(r, "LIN_BUS1");
+    ASSERT(rg != NULL);
+    ASSERT(rg->property_count == 1);
+
+    MeasBusMetadata *decoded = NULL;
+    ASSERT_EQ_INT(meas_group_read_bus_def(rg, &decoded), 0);
+    ASSERT(decoded != NULL);
+    ASSERT_EQ_INT(decoded->bus_config.bus_type,           MEAS_BUS_LIN);
+    ASSERT_EQ_INT(decoded->bus_config.u.lin.baud_rate,    19200);
+    ASSERT_EQ_INT(decoded->bus_config.u.lin.lin_version,  2);
+    ASSERT(strcmp(decoded->raw_frame_channel_name, "LinFrames") == 0);
+
+    meas_bus_metadata_free(decoded);
+    meas_reader_close(r);
+    PASS();
+}
+
 static void test_cross_language_read(void) {
     TEST("cross_language_read_demo_file");
     /* Try to open the demo measurement file written by the C# implementation.
@@ -529,6 +849,12 @@ int main(void) {
     test_null_safety();
     test_single_value_helpers();
     test_string_channel();
+    test_can_frame_write_read();
+    test_lin_frame_write_read();
+    test_flexray_frame_write_read();
+    test_ethernet_frame_write_read();
+    test_bus_metadata_encode_decode();
+    test_bus_def_group_property();
     test_cross_language_read();
 
     printf("\n%d/%d tests passed", g_passed, g_tests);
