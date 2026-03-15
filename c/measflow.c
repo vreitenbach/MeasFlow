@@ -9,6 +9,9 @@
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
 #  define _POSIX_C_SOURCE 200809L
 #endif
+#ifdef _MSC_VER
+#  define strdup _strdup
+#endif
 
 #include "measflow.h"
 
@@ -562,6 +565,7 @@ static int ensure_metadata(MeasWriter *w) {
 /* ── Writer public API ────────────────────────────────────────────────────── */
 
 MeasWriter *meas_writer_open(const char *path) {
+    if (!path) return NULL;
     FILE *f = fopen(path, "wb");
     if (!f) return NULL;
 
@@ -1904,6 +1908,7 @@ static int decode_data_segment(const uint8_t *buf, size_t bufsz,
 /* ── Reader public API ───────────────────────────────────────────────────── */
 
 MeasReader *meas_reader_open(const char *path) {
+    if (!path) return NULL;
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;
 

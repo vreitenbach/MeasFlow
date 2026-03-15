@@ -30,7 +30,11 @@
 
 ## Publishing
 
-- [ ] NuGet package release for C#
-- [ ] PyPI release for Python
-- [ ] Vcpkg release for C
+- [x] NuGet package metadata (csproj ready, `dotnet pack` works)
+- [x] PyPI package metadata (pyproject.toml ready, `python -m build` works)
+- [x] Vcpkg port files prepared (c/port/)
+- [x] Third-party license notices (THIRD-PARTY-NOTICES.md)
+- [ ] NuGet publish to nuget.org
+- [ ] PyPI publish to pypi.org
+- [ ] Vcpkg registry submission
 

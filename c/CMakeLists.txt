@@ -3,11 +3,15 @@ project(measflow_c C)
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+include(GNUInstallDirs)
 
 # ── Library ──────────────────────────────────────────────────────────────────
 
 add_library(measflow STATIC measflow.c)
-target_include_directories(measflow PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(measflow PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
 
 if(MSVC)
     target_compile_options(measflow PRIVATE /W4 /WX)
@@ -16,29 +20,56 @@ else()
 endif()
 
 # ── Optional compression support ─────────────────────────────────────────────
+# Prefers vcpkg (find_package), falls back to pkg-config on Linux/macOS.
 
-find_package(PkgConfig QUIET)
+find_package(lz4 CONFIG QUIET)
+find_package(zstd CONFIG QUIET)
 
-if(PkgConfig_FOUND)
-    pkg_check_modules(LZ4 IMPORTED_TARGET liblz4)
-    pkg_check_modules(ZSTD IMPORTED_TARGET libzstd)
+if(NOT lz4_FOUND AND NOT zstd_FOUND)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(LZ4_PKG IMPORTED_TARGET liblz4)
+        pkg_check_modules(ZSTD_PKG IMPORTED_TARGET libzstd)
+    endif()
 endif()
 
-if(LZ4_FOUND)
+if(lz4_FOUND)
     target_compile_definitions(measflow PUBLIC MEAS_HAVE_LZ4)
-    target_link_libraries(measflow PUBLIC PkgConfig::LZ4)
-    message(STATUS "LZ4 compression: enabled")
+    target_link_libraries(measflow PUBLIC lz4::lz4)
+    message(STATUS "LZ4 compression: enabled (vcpkg)")
+elseif(LZ4_PKG_FOUND)
+    target_compile_definitions(measflow PUBLIC MEAS_HAVE_LZ4)
+    target_link_libraries(measflow PUBLIC PkgConfig::LZ4_PKG)
+    message(STATUS "LZ4 compression: enabled (pkg-config)")
 else()
     message(STATUS "LZ4 compression: disabled (liblz4 not found)")
 endif()
 
-if(ZSTD_FOUND)
+if(zstd_FOUND)
     target_compile_definitions(measflow PUBLIC MEAS_HAVE_ZSTD)
-    target_link_libraries(measflow PUBLIC PkgConfig::ZSTD)
-    message(STATUS "Zstd compression: enabled")
+    target_link_libraries(measflow PUBLIC zstd::libzstd)
+    message(STATUS "Zstd compression: enabled (vcpkg)")
+elseif(ZSTD_PKG_FOUND)
+    target_compile_definitions(measflow PUBLIC MEAS_HAVE_ZSTD)
+    target_link_libraries(measflow PUBLIC PkgConfig::ZSTD_PKG)
+    message(STATUS "Zstd compression: enabled (pkg-config)")
 else()
     message(STATUS "Zstd compression: disabled (libzstd not found)")
 endif()
+
+# ── Install ─────────────────────────────────────────────────────────────────
+
+install(TARGETS measflow
+    EXPORT measflow-targets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+install(FILES measflow.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(EXPORT measflow-targets
+    FILE measflow-config.cmake
+    NAMESPACE measflow::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/measflow
+)
 
 # ── Quickstart ───────────────────────────────────────────────────────────────
 
