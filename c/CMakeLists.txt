@@ -19,42 +19,24 @@ else()
     target_compile_options(measflow PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
 
-# ── Optional compression support ─────────────────────────────────────────────
-# Prefers vcpkg (find_package), falls back to pkg-config on Linux/macOS.
+# ── Optional compression support (via vcpkg) ────────────────────────────────
 
 find_package(lz4 CONFIG QUIET)
-find_package(zstd CONFIG QUIET)
-
-if(NOT lz4_FOUND AND NOT zstd_FOUND)
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(LZ4_PKG IMPORTED_TARGET liblz4)
-        pkg_check_modules(ZSTD_PKG IMPORTED_TARGET libzstd)
-    endif()
-endif()
-
-if(lz4_FOUND)
+if(lz4_FOUND AND TARGET lz4::lz4)
     target_compile_definitions(measflow PUBLIC MEAS_HAVE_LZ4)
     target_link_libraries(measflow PUBLIC lz4::lz4)
-    message(STATUS "LZ4 compression: enabled (vcpkg)")
-elseif(LZ4_PKG_FOUND)
-    target_compile_definitions(measflow PUBLIC MEAS_HAVE_LZ4)
-    target_link_libraries(measflow PUBLIC PkgConfig::LZ4_PKG)
-    message(STATUS "LZ4 compression: enabled (pkg-config)")
+    message(STATUS "LZ4 compression: enabled")
 else()
-    message(STATUS "LZ4 compression: disabled (liblz4 not found)")
+    message(STATUS "LZ4 compression: disabled (lz4 not found)")
 endif()
 
-if(zstd_FOUND)
+find_package(zstd CONFIG QUIET)
+if(zstd_FOUND AND TARGET zstd::libzstd)
     target_compile_definitions(measflow PUBLIC MEAS_HAVE_ZSTD)
     target_link_libraries(measflow PUBLIC zstd::libzstd)
-    message(STATUS "Zstd compression: enabled (vcpkg)")
-elseif(ZSTD_PKG_FOUND)
-    target_compile_definitions(measflow PUBLIC MEAS_HAVE_ZSTD)
-    target_link_libraries(measflow PUBLIC PkgConfig::ZSTD_PKG)
-    message(STATUS "Zstd compression: enabled (pkg-config)")
+    message(STATUS "Zstd compression: enabled")
 else()
-    message(STATUS "Zstd compression: disabled (libzstd not found)")
+    message(STATUS "Zstd compression: disabled (zstd not found)")
 endif()
 
 # ── Install ─────────────────────────────────────────────────────────────────
