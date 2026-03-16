@@ -600,6 +600,9 @@ MeasWriter *meas_writer_open(const char *path) {
     w->created_at_ns = now_nanos();
     gen_uuid(w->file_id);
 
+    /* Use 64 KB stdio buffer — reduces write syscalls for large data */
+    setvbuf(f, NULL, _IOFBF, 65536);
+
     /* Write 64-byte placeholder so the file header can be patched later */
     uint8_t placeholder[64] = {0};
     if (fwrite(placeholder, 1, 64, f) != 64) {
@@ -751,7 +754,9 @@ static size_t compute_data_content_size(const MeasWriter *w) {
     return total;
 }
 
-int meas_writer_flush(MeasWriter *writer) {
+/* Internal flush — skip_fflush avoids redundant fflush when called from close
+   (fclose already flushes). */
+static int flush_internal(MeasWriter *writer, int skip_fflush) {
     if (!writer) return -1;
     if (!ensure_metadata(writer)) return -1;
 
@@ -796,7 +801,7 @@ int meas_writer_flush(MeasWriter *writer) {
             }
         }
         writer->segment_count++;
-        if (fflush(writer->file) != 0) return -1;
+        if (!skip_fflush && fflush(writer->file) != 0) return -1;
         return 0;
     }
 
@@ -826,28 +831,41 @@ int meas_writer_flush(MeasWriter *writer) {
                             compressed, comp_len, pending);
     free(compressed);
     bbuf_free(&seg);
-    if (fflush(writer->file) != 0) return -1;
+    if (!skip_fflush && fflush(writer->file) != 0) return -1;
     return ok ? 0 : -1;
 
 fail:
     bbuf_free(&seg); return -1;
 }
 
+int meas_writer_flush(MeasWriter *writer) {
+    return flush_internal(writer, 0);
+}
+
 void meas_writer_close(MeasWriter *writer) {
     if (!writer) return;
 
-    /* Flush any remaining data */
-    meas_writer_flush(writer);
+    /* Flush any remaining data — skip fflush since fclose will flush */
+    flush_internal(writer, 1);
 
-    /* Patch metadata segment in-place with final statistics */
+    /* Patch metadata segment in-place with final statistics.
+       Skip entirely when no channel has active stats — the metadata
+       is identical to what was written at first flush time. */
     if (writer->metadata_written && writer->metadata_content_offset > 0) {
-        ByteBuf final_meta; bbuf_init(&final_meta);
-        if (build_metadata(writer, &final_meta, 1 /* with real stats */)) {
-            fseek(writer->file, (long)writer->metadata_content_offset, SEEK_SET);
-            fwrite(final_meta.data, 1, final_meta.size, writer->file);
-            fseek(writer->file, 0, SEEK_END);
+        int any_stats = 0;
+        for (int gi = 0; gi < writer->group_count && !any_stats; gi++)
+            for (int ci = 0; ci < writer->groups[gi]->channel_count && !any_stats; ci++)
+                if (writer->groups[gi]->channels[ci]->stats.active)
+                    any_stats = 1;
+        if (any_stats) {
+            ByteBuf final_meta; bbuf_init(&final_meta);
+            if (build_metadata(writer, &final_meta, 1 /* with real stats */)) {
+                fseek(writer->file, (long)writer->metadata_content_offset, SEEK_SET);
+                fwrite(final_meta.data, 1, final_meta.size, writer->file);
+                fseek(writer->file, 0, SEEK_END);
+            }
+            bbuf_free(&final_meta);
         }
-        bbuf_free(&final_meta);
     }
 
     /* Patch file header with final segment count */
@@ -2090,11 +2108,34 @@ struct MeasReader {
 };
 
 /* Append raw bytes to a channel's data array */
-static int channel_append_data(MeasChannelData *ch, const uint8_t *src, size_t len) {
-    uint8_t *p = (uint8_t *)realloc(ch->data, (size_t)ch->data_size + len);
-    if (!p) return 0;
-    memcpy(p + ch->data_size, src, len);
-    ch->data = p;
+/* Append data to channel. For the first append of uncompressed mmap data,
+   store a borrowed pointer (zero-copy). On subsequent appends, transition
+   to an owned buffer. The 'borrowed' flag indicates src points into stable
+   memory (mmap) that will outlive the reader. */
+static int channel_append_data(MeasChannelData *ch, const uint8_t *src, size_t len, int borrowed) {
+    if (ch->data == NULL && borrowed) {
+        /* Zero-copy: point directly into mmap buffer */
+        ch->data = (uint8_t *)src; /* const-cast safe: read-only via API */
+        ch->data_size = (int64_t)len;
+        ch->data_owned = 0;
+        return 1;
+    }
+    /* Must copy: either second append or non-borrowed (decompressed) data */
+    if (!ch->data_owned && ch->data != NULL) {
+        /* Transition from borrowed to owned: copy existing data first */
+        uint8_t *p = (uint8_t *)malloc((size_t)ch->data_size + len);
+        if (!p) return 0;
+        memcpy(p, ch->data, (size_t)ch->data_size);
+        memcpy(p + ch->data_size, src, len);
+        ch->data = p;
+        ch->data_owned = 1;
+    } else {
+        uint8_t *p = (uint8_t *)realloc(ch->data, (size_t)ch->data_size + len);
+        if (!p) return 0;
+        memcpy(p + ch->data_size, src, len);
+        ch->data = p;
+        ch->data_owned = 1;
+    }
     ch->data_size += (int64_t)len;
     return 1;
 }
@@ -2138,9 +2179,11 @@ static int decode_metadata_segment(MeasReader *r, const uint8_t *buf, size_t buf
 }
 
 /* Process a data segment (§7).
-   all_channels is a flat array indexed by global channel index. */
+   all_channels is a flat array indexed by global channel index.
+   'borrowed' indicates buf points into stable mmap memory (zero-copy eligible). */
 static int decode_data_segment(const uint8_t *buf, size_t bufsz,
-                                MeasChannelData **all_channels, int total_channels) {
+                                MeasChannelData **all_channels, int total_channels,
+                                int borrowed) {
     size_t off = 0;
     if (off + 4 > bufsz) return 0;
     int32_t chunk_count = (int32_t)read_le32(buf + off); off += 4;
@@ -2154,7 +2197,7 @@ static int decode_data_segment(const uint8_t *buf, size_t bufsz,
         if (data_len < 0 || (size_t)data_len > bufsz - off) return 0;
         if (ch_idx >= 0 && ch_idx < total_channels && all_channels[ch_idx]) {
             MeasChannelData *ch = all_channels[ch_idx];
-            if (!channel_append_data(ch, buf + off, (size_t)data_len)) return 0;
+            if (!channel_append_data(ch, buf + off, (size_t)data_len, borrowed)) return 0;
             ch->sample_count += samples;
         }
         off += (size_t)data_len;
@@ -2172,7 +2215,8 @@ MeasReader *meas_reader_open(const char *path) {
     size_t fsz = 0;
 #ifdef _WIN32
     HANDLE hFile = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                               NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                               NULL, OPEN_EXISTING,
+                               FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     if (hFile == INVALID_HANDLE_VALUE) return NULL;
     LARGE_INTEGER li;
     if (!GetFileSizeEx(hFile, &li)) { CloseHandle(hFile); return NULL; }
@@ -2277,7 +2321,9 @@ MeasReader *meas_reader_open(const char *path) {
                 for (int ci = 0; ci < r->groups[gi].channel_count; ci++)
                     flat_channels[idx++] = &r->groups[gi].channels[ci];
         } else if (seg_type == MEAS_SEG_TYPE_DATA && flat_channels) {
-            decode_data_segment(content, content_sz, flat_channels, total_channels);
+            /* Data from mmap (no decompression) is borrowed — zero-copy eligible */
+            int data_borrowed = (decompressed == NULL) ? 1 : 0;
+            decode_data_segment(content, content_sz, flat_channels, total_channels, data_borrowed);
         }
 
         free(decompressed);
@@ -2298,7 +2344,7 @@ void meas_reader_close(MeasReader *reader) {
         for (int ci = 0; ci < g->channel_count; ci++) {
             MeasChannelData *ch = &g->channels[ci];
             free(ch->name);
-            free(ch->data);
+            if (ch->data_owned) free(ch->data);
             free_properties(ch->properties, ch->property_count);
         }
         free(g->channels);

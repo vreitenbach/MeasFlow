@@ -114,6 +114,7 @@ typedef struct MeasChannelData {
     int64_t  sample_count;
     uint8_t *data;       /* raw bytes, NULL if no samples */
     int64_t  data_size;  /* total bytes in data[] */
+    int      data_owned; /* 1 if data was malloc'd and must be freed, 0 if borrowed (mmap) */
 
     int              has_stats;
     MeasChannelStats stats;
