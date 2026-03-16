@@ -127,17 +127,22 @@ public sealed class MeasChannel
 
 /// <summary>
 /// Reference to a chunk of raw data bytes within the file.
+/// Zero-copy: stores a reference to the segment content array with offset/length.
 /// </summary>
 internal readonly struct DataChunkRef
 {
     public readonly long SampleCount;
     private readonly byte[] _data;
+    private readonly int _offset;
+    private readonly int _length;
 
-    public DataChunkRef(long sampleCount, byte[] data)
+    public DataChunkRef(long sampleCount, byte[] data, int offset, int length)
     {
         SampleCount = sampleCount;
         _data = data;
+        _offset = offset;
+        _length = length;
     }
 
-    public ReadOnlySpan<byte> GetBytes() => _data;
+    public ReadOnlySpan<byte> GetBytes() => _data.AsSpan(_offset, _length);
 }

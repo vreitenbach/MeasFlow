@@ -166,13 +166,14 @@ public sealed class MeasReader : IDisposable
             var (channelIndex, sampleCount, dataByteLength) =
                 DataEncoder.ReadChunkHeader(content, ref offset);
 
-            var data = new byte[dataByteLength];
-            content.AsSpan(offset, (int)dataByteLength).CopyTo(data);
+            // Zero-copy: reference slice of segment content instead of allocating + copying
+            int dataOffset = offset;
             offset += (int)dataByteLength;
 
             if (channelIndex < _allChannels.Count && _allChannels[channelIndex] != null)
             {
-                _allChannels[channelIndex].AddChunk(new DataChunkRef(sampleCount, data));
+                _allChannels[channelIndex].AddChunk(
+                    new DataChunkRef(sampleCount, content, dataOffset, (int)dataByteLength));
             }
         }
     }
