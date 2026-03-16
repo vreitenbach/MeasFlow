@@ -1,0 +1,111 @@
+name: Benchmarks
+
+on:
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same PR
+concurrency:
+  group: benchmarks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Cross-language benchmarks
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Setup ────────────────────────────────────────────────────────────
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        run: pip install -e ".[dev]"
+        working-directory: python
+
+      - name: Install C vcpkg deps
+        run: vcpkg install lz4 zstd
+
+      - name: Build C library + benchmarks
+        run: |
+          cmake -B build -S c -DMEAS_BUILD_BENCHMARKS=ON \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      # ── Run benchmarks ───────────────────────────────────────────────────
+      - name: C# cross-language benchmark
+        run: |
+          dotnet run --project csharp/benchmarks/MeasFlow.Benchmarks/MeasFlow.Benchmarks.csproj \
+            -c Release -- --filter "*CrossLanguage*" --exporters GitHub \
+            > csharp_bench.txt 2>&1
+        continue-on-error: true
+
+      - name: Python cross-language benchmark
+        run: python benchmarks/cross_language.py > ../python_bench.txt 2>&1
+        working-directory: python
+        continue-on-error: true
+
+      - name: C cross-language benchmark
+        run: ./build/bench_cross_language > c_bench.txt 2>&1
+        continue-on-error: true
+
+      # ── Collect results ──────────────────────────────────────────────────
+      - name: Build benchmark report
+        run: |
+          cat <<'HEADER' > bench_report.md
+          ## Benchmark Results
+
+          > Cross-language performance comparison (MeasFlow only, no HDF5).
+          > Numbers are indicative — CI runners have variable performance.
+
+          HEADER
+
+          echo '### C#' >> bench_report.md
+          echo '```' >> bench_report.md
+          # Extract the summary table from BenchmarkDotNet output
+          if [ -f csharp_bench.txt ]; then
+            sed -n '/^\| Method/,/^$/p' csharp_bench.txt >> bench_report.md
+          else
+            echo "(benchmark did not run)" >> bench_report.md
+          fi
+          echo '```' >> bench_report.md
+          echo '' >> bench_report.md
+
+          echo '### Python' >> bench_report.md
+          echo '```' >> bench_report.md
+          if [ -f python_bench.txt ]; then
+            cat python_bench.txt >> bench_report.md
+          else
+            echo "(benchmark did not run)" >> bench_report.md
+          fi
+          echo '```' >> bench_report.md
+          echo '' >> bench_report.md
+
+          echo '### C' >> bench_report.md
+          echo '```' >> bench_report.md
+          if [ -f c_bench.txt ]; then
+            cat c_bench.txt >> bench_report.md
+          else
+            echo "(benchmark did not run)" >> bench_report.md
+          fi
+          echo '```' >> bench_report.md
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: bench_report.md
+
+      - name: Comment on PR
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: benchmarks
+          path: bench_report.md
