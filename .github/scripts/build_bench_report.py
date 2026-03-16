@@ -180,14 +180,16 @@ def main():
             if mf and hdf and "ms" in mf and "ms" in hdf:
                 ratio = mf["ms"] / hdf["ms"] if hdf["ms"] > 0 else 0
                 icon = "\U0001f7e2" if ratio <= 1.5 else "\U0001f7e1" if ratio <= 3 else "\U0001f534"
-                row[lang] = f"{fmt_ms(mf['ms'])} vs {fmt_ms(hdf['ms'])} ({icon} {ratio:.1f}x)"
+                row[lang] = f"{icon} {ratio:.1f}x ({fmt_ms(mf['ms'])})"
             elif mf and "ms" in mf:
-                row[lang] = f"{fmt_ms(mf['ms'])} (no HDF5)"
+                row[lang] = fmt_ms(mf["ms"])
         if any(lang in row for lang in ["C", "C#", "Python"]):
             hdf5_table_rows.append(row)
 
     if hdf5_table_rows:
         out.append(f"### vs HDF5 \u2014 {n:,} samples\n")
+        out.append("> Ratio = MeasFlow / HDF5 \u2014 lower is better "
+                   "(\U0001f7e2 \u22641.5x, \U0001f7e1 \u22643x, \U0001f534 >3x)\n")
         out.append("| Operation | C | C# | Python |")
         out.append("|---|---|---|---|")
         for row in hdf5_table_rows:
@@ -206,7 +208,7 @@ def main():
         size_section = fmtcmp[lang][n].get("File size", {})
         mf_entry = next((v for k, v in size_section.items() if "MeasFlow" in k), None)
         hdf_entry = next((v for k, v in size_section.items() if "HDF5" in k), None)
-        raw_entry = next((v for k, v in size_section.items() if "Raw" in k.lower() or "raw" in k), None)
+        raw_entry = next((v for k, v in size_section.items() if "raw" in k.lower()), None)
         if raw_entry and "kb" in raw_entry and raw_kb is None:
             raw_kb = raw_entry["kb"]
         if mf_entry and "kb" in mf_entry:
