@@ -1,0 +1,89 @@
+name: Benchmarks
+
+on:
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same PR
+concurrency:
+  group: benchmarks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Performance benchmarks
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Setup ────────────────────────────────────────────────────────────
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        run: pip install -e ".[dev]" h5py
+        working-directory: python
+
+      - name: Install C vcpkg deps (with HDF5)
+        run: vcpkg install lz4 zstd hdf5
+
+      - name: Build C library + benchmarks (with HDF5)
+        run: |
+          cmake -B build -S c -DMEAS_BUILD_BENCHMARKS=ON \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_MANIFEST_FEATURES="benchmarks" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      # ── C# benchmarks (plain-text CI mode) ────────────────────────────
+      - name: C# cross-language benchmark
+        run: |
+          dotnet run --project csharp/benchmarks/MeasFlow.Benchmarks/MeasFlow.Benchmarks.csproj \
+            -c Release -- --ci > csharp_all.txt 2>&1
+          # Split into cross-language and format comparison files
+          python3 -c "
+          text = open('csharp_all.txt').read()
+          parts = text.split('Format comparison')
+          open('csharp_xlang.txt', 'w').write(parts[0])
+          if len(parts) > 1:
+              open('csharp_fmtcmp.txt', 'w').write('Format comparison' + ''.join(parts[1:]))
+          "
+        continue-on-error: true
+
+      # ── Python benchmarks ──────────────────────────────────────────────
+      - name: Python cross-language benchmark
+        run: python benchmarks/cross_language.py > ../python_xlang.txt 2>&1
+        working-directory: python
+        continue-on-error: true
+
+      - name: Python format comparison benchmark
+        run: python benchmarks/format_comparison.py > ../python_fmtcmp.txt 2>&1
+        working-directory: python
+        continue-on-error: true
+
+      # ── C benchmarks ───────────────────────────────────────────────────
+      - name: C cross-language benchmark
+        run: ./build/bench_cross_language > c_xlang.txt 2>&1
+        continue-on-error: true
+
+      - name: C format comparison benchmark
+        run: ./build/bench_format_comparison > c_fmtcmp.txt 2>&1
+        continue-on-error: true
+
+      # ── Build report ───────────────────────────────────────────────────
+      - name: Build benchmark report
+        run: python .github/scripts/build_bench_report.py
+
+      - name: Comment on PR
+        # Silently skip for fork PRs (read-only GITHUB_TOKEN)
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: benchmarks
+          path: bench_report.md

@@ -15,6 +15,7 @@ import time
 
 import numpy as np
 
+from measflow.types import MeasDataType
 from measflow.writer import MeasWriter
 from measflow.reader import MeasReader
 
@@ -64,7 +65,7 @@ class BenchmarkSuite:
     def _write_measflow(self, path: str, data: np.ndarray):
         with MeasWriter(path) as w:
             g = w.add_group("Data")
-            ch = g.add_channel("Signal")
+            ch = g.add_channel("Signal", MeasDataType.Float32, track_statistics=False)
             ch.write_bulk(data)
 
     def _read_measflow(self, path: str) -> np.ndarray:
@@ -103,7 +104,7 @@ class BenchmarkSuite:
             with MeasWriter(p) as w:
                 g = w.add_group("Data")
                 for c in range(10):
-                    ch = g.add_channel(f"Ch{c}")
+                    ch = g.add_channel(f"Ch{c}", MeasDataType.Float32, track_statistics=False)
                     ch.write_bulk(self.data)
 
         results["MeasFlow"] = _bench(write_meas_10ch)
@@ -126,6 +127,39 @@ class BenchmarkSuite:
             results["HDF5 (h5py)"] = _bench(lambda: self._read_h5(self.h5_file))
         return results
 
+    def bench_read_10ch(self) -> dict:
+        results = {}
+
+        # Prepare 10-channel files
+        meas10 = os.path.join(self.tmp_dir, "r10.meas")
+        with MeasWriter(meas10) as w:
+            g = w.add_group("Data")
+            for c in range(10):
+                ch = g.add_channel(f"Ch{c}", MeasDataType.Float32, track_statistics=False)
+                ch.write_bulk(self.data)
+
+        def read_meas_10ch():
+            with MeasReader(meas10) as r:
+                for c in range(10):
+                    r["Data"][f"Ch{c}"].read_all()
+
+        results["MeasFlow"] = _bench(read_meas_10ch)
+
+        if HAS_H5PY:
+            h510 = os.path.join(self.tmp_dir, "r10.h5")
+            with h5py.File(h510, "w") as f:
+                grp = f.create_group("Data")
+                for c in range(10):
+                    grp.create_dataset(f"Ch{c}", data=self.data)
+
+            def read_h5_10ch():
+                with h5py.File(h510, "r") as f:
+                    for c in range(10):
+                        f["Data"][f"Ch{c}"][:]
+
+            results["HDF5 (h5py)"] = _bench(read_h5_10ch)
+        return results
+
     def bench_streaming_write(self) -> dict:
         results = {}
         chunk_size = self.sample_count // 10
@@ -134,21 +168,13 @@ class BenchmarkSuite:
             p = os.path.join(self.tmp_dir, "stream.meas")
             with MeasWriter(p) as w:
                 g = w.add_group("Data")
-                ch = g.add_channel("Signal")
+                ch = g.add_channel("Signal", MeasDataType.Float32, track_statistics=False)
                 for i in range(10):
                     ch.write_bulk(self.data[i * chunk_size : (i + 1) * chunk_size])
                     w.flush()
 
+        # HDF5 has no streaming support — MeasFlow only
         results["MeasFlow (10 flushes)"] = _bench(stream_meas)
-
-        if HAS_H5PY:
-            def stream_h5():
-                p = os.path.join(self.tmp_dir, "stream.h5")
-                with h5py.File(p, "w") as f:
-                    grp = f.create_group("Data")
-                    grp.create_dataset("Signal", data=self.data)
-
-            results["HDF5 -- no streaming"] = _bench(stream_h5)
         return results
 
     def bench_file_size(self) -> dict:
@@ -174,18 +200,16 @@ def _print_results(name: str, results: dict):
     print(f"  {name}")
     print(f"{'-' * 60}")
     for label, data in results.items():
-        parts = []
         if "median_ms" in data:
-            parts.append(f"{data['median_ms']:8.2f} ms")
-        if "size_kb" in data:
-            parts.append(f"{data['size_kb']:8.1f} KB")
-        print(f"  {label:30s} {' | '.join(parts)}")
+            print(f"  {label}: {data['median_ms']:8.2f} ms")
+        elif "size_kb" in data:
+            print(f"  {label}: {data['size_kb']:8.1f} KB")
 
 
 def main():
     for n in [100_000, 1_000_000]:
         print(f"\n{'=' * 60}")
-        print(f"  Samples: {n:,}")
+        print(f"  Format comparison (Python) -- {n} samples")
         print(f"{'=' * 60}")
 
         suite = BenchmarkSuite(sample_count=n)
@@ -193,6 +217,7 @@ def main():
             _print_results("Write 1 channel", suite.bench_write_1ch())
             _print_results("Write 10 channels", suite.bench_write_10ch())
             _print_results("Read 1 channel", suite.bench_read_1ch())
+            _print_results("Read 10 channels", suite.bench_read_10ch())
             _print_results("Streaming write", suite.bench_streaming_write())
             _print_results("File size", suite.bench_file_size())
         finally:

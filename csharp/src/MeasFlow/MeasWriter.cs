@@ -1,4 +1,6 @@
-﻿using System.Buffers.Binary;
+﻿using System.Buffers;
+using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using MeasFlow.Bus;
 using MeasFlow.Format;
@@ -100,6 +102,11 @@ public sealed class MeasWriter : IDisposable
 
         _stream.Flush();
         _stream.Dispose();
+
+        // Return pooled buffers from all channels
+        foreach (var group in _groups)
+            foreach (var channel in group.ChannelWriters)
+                channel.ReleaseResources();
     }
 
     private void EnsureMetadataWritten()
@@ -278,10 +285,10 @@ public sealed class GroupWriter
         _writer = writer;
     }
 
-    public ChannelWriter<T> AddChannel<T>(string name) where T : unmanaged
+    public ChannelWriter<T> AddChannel<T>(string name, bool trackStatistics = true) where T : unmanaged
     {
         var dataType = MeasDataTypeExtensions.FromClrType<T>();
-        var channel = new ChannelWriter<T>(name, dataType);
+        var channel = new ChannelWriter<T>(name, dataType, trackStatistics);
         ChannelWriters.Add(channel);
         return channel;
     }
@@ -335,27 +342,41 @@ public abstract class ChannelWriter
 
     /// <summary>Write statistics to properties dictionary. Override in typed writers.</summary>
     internal virtual void WriteStatistics(Dictionary<string, MeasValue> props) { }
+
+    /// <summary>Return any pooled resources. Called from MeasWriter.Dispose.</summary>
+    internal virtual void ReleaseResources() { }
 }
 
 /// <summary>
 /// Typed channel writer for fixed-size data types.
+/// Uses ArrayPool to minimize allocations and GC pressure.
 /// </summary>
 public sealed class ChannelWriter<T> : ChannelWriter where T : unmanaged
 {
-    private readonly List<T> _buffer = [];
-    private readonly bool _trackStats = NumericConverter.IsNumeric<T>();
+    private byte[]? _buffer;
+    private int _byteCount;
+    private int _sampleCount;
+    private readonly bool _trackStats;
     private StatisticsAccumulator _stats;
 
-    internal ChannelWriter(string name, MeasDataType dataType) : base(name, dataType) { }
+    internal ChannelWriter(string name, MeasDataType dataType, bool trackStatistics = true)
+        : base(name, dataType)
+    {
+        _trackStats = trackStatistics && NumericConverter.IsNumeric<T>();
+    }
 
-    internal override bool HasPendingData => _buffer.Count > 0;
+    internal override bool HasPendingData => _sampleCount > 0;
 
     /// <summary>Current running statistics for this channel.</summary>
     public ChannelStatistics Statistics => _stats.ToStatistics();
 
     public void Write(T value)
     {
-        _buffer.Add(value);
+        int size = Unsafe.SizeOf<T>();
+        EnsureCapacity(_byteCount + size);
+        Unsafe.WriteUnaligned(ref _buffer![_byteCount], value);
+        _byteCount += size;
+        _sampleCount++;
         if (_trackStats) _stats.Update(NumericConverter.ToDouble(value));
     }
 
@@ -364,26 +385,31 @@ public sealed class ChannelWriter<T> : ChannelWriter where T : unmanaged
     {
         if (values.IsEmpty) return;
 
-        // Pre-allocate to avoid repeated List<T> growth copies
-        int needed = _buffer.Count + values.Length;
-        if (_buffer.Capacity < needed)
-            _buffer.Capacity = needed;
+        // Direct byte copy — no intermediate List<T>
+        var bytes = MemoryMarshal.AsBytes(values);
+        EnsureCapacity(_byteCount + bytes.Length);
+        bytes.CopyTo(_buffer.AsSpan(_byteCount));
+        _byteCount += bytes.Length;
+        _sampleCount += values.Length;
 
         if (_trackStats)
+            _stats.UpdateBulk(values);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void EnsureCapacity(int needed)
+    {
+        if (_buffer == null)
         {
-            foreach (var v in values)
-            {
-                _buffer.Add(v);
-                _stats.Update(NumericConverter.ToDouble(v));
-            }
+            _buffer = ArrayPool<byte>.Shared.Rent(Math.Max(needed, 4096));
+            return;
         }
-        else
-        {
-            // Fast path: bulk copy via CollectionsMarshal (no per-element overhead)
-            int startCount = _buffer.Count;
-            CollectionsMarshal.SetCount(_buffer, needed);
-            values.CopyTo(CollectionsMarshal.AsSpan(_buffer).Slice(startCount));
-        }
+        if (needed <= _buffer.Length) return;
+        int newSize = Math.Max(needed, _buffer.Length * 2);
+        var newBuf = ArrayPool<byte>.Shared.Rent(newSize);
+        _buffer.AsSpan(0, _byteCount).CopyTo(newBuf);
+        ArrayPool<byte>.Shared.Return(_buffer);
+        _buffer = newBuf;
     }
 
     internal override void WriteStatistics(Dictionary<string, MeasValue> props)
@@ -393,15 +419,25 @@ public sealed class ChannelWriter<T> : ChannelWriter where T : unmanaged
 
     internal override void FlushToStream(Stream stream, int globalIndex)
     {
-        if (_buffer.Count == 0) return;
+        if (_sampleCount == 0) return;
 
-        var span = CollectionsMarshal.AsSpan(_buffer);
-        var bytes = MemoryMarshal.AsBytes(span);
+        DataEncoder.WriteChunkHeader(stream, globalIndex, _sampleCount, _byteCount);
+        stream.Write(_buffer.AsSpan(0, _byteCount));
 
-        DataEncoder.WriteChunkHeader(stream, globalIndex, _buffer.Count, bytes.Length);
-        stream.Write(bytes);
+        // Return large buffer to pool, start fresh on next write
+        ArrayPool<byte>.Shared.Return(_buffer!);
+        _buffer = null;
+        _byteCount = 0;
+        _sampleCount = 0;
+    }
 
-        _buffer.Clear();
+    internal override void ReleaseResources()
+    {
+        if (_buffer != null)
+        {
+            ArrayPool<byte>.Shared.Return(_buffer);
+            _buffer = null;
+        }
     }
 }
 

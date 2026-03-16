@@ -82,6 +82,7 @@ static void write_measflow(const char *path, const float *data, int n)
     MeasWriter *w = meas_writer_open(path);
     MeasGroupWriter *g = meas_writer_add_group(w, "Data");
     MeasChannelWriter *ch = meas_group_add_channel(g, "Signal", MEAS_FLOAT32);
+    meas_channel_set_statistics(ch, 0);
     meas_channel_write_f32(ch, data, n);
     meas_writer_close(w);
 }
@@ -103,11 +104,45 @@ static void read_measflow(const char *path, const float *data, int n)
     meas_reader_close(r);
 }
 
+static void write_measflow_10ch(const char *path, const float *data, int n)
+{
+    MeasWriter *w = meas_writer_open(path);
+    MeasGroupWriter *g = meas_writer_add_group(w, "Data");
+    char name[16];
+    for (int c = 0; c < 10; c++) {
+        snprintf(name, sizeof(name), "Ch%d", c);
+        MeasChannelWriter *ch = meas_group_add_channel(g, name, MEAS_FLOAT32);
+        meas_channel_set_statistics(ch, 0);
+        meas_channel_write_f32(ch, data, n);
+    }
+    meas_writer_close(w);
+}
+
+static void read_measflow_10ch(const char *path, const float *data, int n)
+{
+    (void)data;
+    MeasReader *r = meas_reader_open(path);
+    if (!r) return;
+    const MeasGroupData *grp = meas_reader_group_by_name(r, "Data");
+    if (grp) {
+        char name[16];
+        float *buf = (float *)malloc((size_t)n * sizeof(float));
+        for (int c = 0; c < 10; c++) {
+            snprintf(name, sizeof(name), "Ch%d", c);
+            const MeasChannelData *ch = meas_group_channel_by_name(grp, name);
+            if (ch) meas_channel_read_f32(ch, buf, n);
+        }
+        free(buf);
+    }
+    meas_reader_close(r);
+}
+
 static void stream_measflow(const char *path, const float *data, int n)
 {
     MeasWriter *w = meas_writer_open(path);
     MeasGroupWriter *g = meas_writer_add_group(w, "Data");
     MeasChannelWriter *ch = meas_group_add_channel(g, "Signal", MEAS_FLOAT32);
+    meas_channel_set_statistics(ch, 0);
     int chunk = n / 10;
     int i;
     for (i = 0; i < 10; i++) {
@@ -147,6 +182,41 @@ static void read_hdf5(const char *path, const float *data, int n)
     H5Fclose(file);
 }
 
+static void read_hdf5_10ch(const char *path, const float *data, int n)
+{
+    (void)data;
+    hid_t file = H5Fopen(path, H5F_ACC_RDONLY, H5P_DEFAULT);
+    float *buf = (float *)malloc((size_t)n * sizeof(float));
+    char name[32];
+    for (int c = 0; c < 10; c++) {
+        snprintf(name, sizeof(name), "/Data/Ch%d", c);
+        hid_t dset = H5Dopen2(file, name, H5P_DEFAULT);
+        H5Dread(dset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, buf);
+        H5Dclose(dset);
+    }
+    free(buf);
+    H5Fclose(file);
+}
+
+static void write_hdf5_10ch(const char *path, const float *data, int n)
+{
+    hid_t file = H5Fcreate(path, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+    hid_t grp = H5Gcreate2(file, "Data", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    hsize_t dims[1] = { (hsize_t)n };
+    hid_t space = H5Screate_simple(1, dims, NULL);
+    char name[16];
+    for (int c = 0; c < 10; c++) {
+        snprintf(name, sizeof(name), "Ch%d", c);
+        hid_t dset = H5Dcreate2(grp, name, H5T_IEEE_F32LE, space,
+                                  H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        H5Dwrite(dset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, data);
+        H5Dclose(dset);
+    }
+    H5Sclose(space);
+    H5Gclose(grp);
+    H5Fclose(file);
+}
+
 static void stream_hdf5(const char *path, const float *data, int n)
 {
     /* HDF5 does not support incremental writes without extensible datasets.
@@ -169,24 +239,23 @@ static long file_size(const char *path)
 
 /* ── Print helpers ──────────────────────────────────────────────────────── */
 
-static void print_header(const char *title, int n)
+static void print_header(const char *title)
 {
     printf("\n");
     for (int i = 0; i < 60; i++) putchar('-');
-    printf("\n  %s  (%d samples)\n", title, n);
+    printf("\n  %s\n", title);
     for (int i = 0; i < 60; i++) putchar('-');
     printf("\n");
 }
 
 static void print_result(const char *label, BenchResult r)
 {
-    printf("  %-30s %8.2f ms (min: %.2f, max: %.2f)\n",
-           label, r.median_ms, r.min_ms, r.max_ms);
+    printf("  %s: %8.2f ms\n", label, r.median_ms);
 }
 
 static void print_size(const char *label, long bytes)
 {
-    printf("  %-30s %8.1f KB\n", label, bytes / 1024.0);
+    printf("  %s: %8.1f KB\n", label, bytes / 1024.0);
 }
 
 /* ── Main ───────────────────────────────────────────────────────────────── */
@@ -211,12 +280,30 @@ int main(void)
         snprintf(h5_path, sizeof(h5_path), "bench_%d.h5", n);
         snprintf(raw_path, sizeof(raw_path), "bench_%d.bin", n);
 
+        printf("\n============================================================\n");
+        printf("  Format comparison (C) -- %d samples\n", n);
+        printf("============================================================\n");
+
         /* Write benchmarks */
-        print_header("Write 1 channel", n);
+        print_header("Write 1 channel");
         print_result("MeasFlow", bench(write_measflow, meas_path, data, n, 1, 5));
 #ifdef MEAS_HAVE_HDF5
         print_result("HDF5 (libhdf5)", bench(write_hdf5, h5_path, data, n, 1, 5));
 #endif
+
+        /* Write 10 channels */
+        print_header("Write 10 channels");
+        {
+            char meas10_path[256], h510_path[256];
+            snprintf(meas10_path, sizeof(meas10_path), "bench_%d_10ch.meas", n);
+            snprintf(h510_path, sizeof(h510_path), "bench_%d_10ch.h5", n);
+            print_result("MeasFlow", bench(write_measflow_10ch, meas10_path, data, n, 1, 5));
+#ifdef MEAS_HAVE_HDF5
+            print_result("HDF5 (libhdf5)", bench(write_hdf5_10ch, h510_path, data, n, 1, 5));
+#endif
+            remove(meas10_path);
+            remove(h510_path);
+        }
 
         /* Read benchmarks */
         write_measflow(meas_path, data, n);
@@ -224,22 +311,35 @@ int main(void)
         write_hdf5(h5_path, data, n);
 #endif
 
-        print_header("Read 1 channel", n);
+        print_header("Read 1 channel");
         print_result("MeasFlow", bench(read_measflow, meas_path, data, n, 1, 5));
 #ifdef MEAS_HAVE_HDF5
         print_result("HDF5 (libhdf5)", bench(read_hdf5, h5_path, data, n, 1, 5));
 #endif
 
-        /* Streaming write */
-        print_header("Streaming write", n);
-        print_result("MeasFlow (10 flushes)", bench(stream_measflow, meas_path, data, n, 1, 5));
+        /* Read 10 channels */
+        print_header("Read 10 channels");
+        {
+            char meas10_path[256], h510_path[256];
+            snprintf(meas10_path, sizeof(meas10_path), "bench_%d_10ch.meas", n);
+            snprintf(h510_path, sizeof(h510_path), "bench_%d_10ch.h5", n);
+            write_measflow_10ch(meas10_path, data, n);
+            print_result("MeasFlow", bench(read_measflow_10ch, meas10_path, data, n, 1, 5));
 #ifdef MEAS_HAVE_HDF5
-        print_result("HDF5 - no streaming", bench(stream_hdf5, h5_path, data, n, 1, 5));
+            write_hdf5_10ch(h510_path, data, n);
+            print_result("HDF5 (libhdf5)", bench(read_hdf5_10ch, h510_path, data, n, 1, 5));
 #endif
+            remove(meas10_path);
+            remove(h510_path);
+        }
+
+        /* Streaming write (MeasFlow only — HDF5 has no streaming support) */
+        print_header("Streaming write");
+        print_result("MeasFlow (10 flushes)", bench(stream_measflow, meas_path, data, n, 1, 5));
 
         /* File size */
         write_measflow(meas_path, data, n);
-        print_header("File size", n);
+        print_header("File size");
         print_size("MeasFlow", file_size(meas_path));
 #ifdef MEAS_HAVE_HDF5
         write_hdf5(h5_path, data, n);
