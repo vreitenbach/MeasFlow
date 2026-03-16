@@ -98,6 +98,11 @@ static float  le_bytes_to_f32(const uint8_t *p) {
 static double le_bytes_to_f64(const uint8_t *p) {
     uint64_t u = read_le64(p); double d; memcpy(&d, &u, 8); return d;
 }
+/* f32_to_le_bytes: only used in big-endian write path; on LE systems the
+   compiler may warn about it being unused, so suppress that. */
+#ifdef __GNUC__
+__attribute__((unused))
+#endif
 static void f32_to_le_bytes(uint8_t *p, float  f) {
     uint32_t u; memcpy(&u, &f, 4); write_le32(p, u);
 }
@@ -352,6 +357,11 @@ typedef struct {
     int     active; /* 1 if dtype supports stats */
 } StatsAcc;
 
+/* stats_update: retained for potential single-sample use; bulk writers use
+   the batch variants below instead. */
+#ifdef __GNUC__
+__attribute__((unused))
+#endif
 static void stats_update(StatsAcc *s, double v) {
     if (!s->active) return;
     s->count++;
