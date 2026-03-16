@@ -67,8 +67,6 @@ if(MEAS_BUILD_QUICKSTART)
     endif()
 endif()
 
-# ── Tests ────────────────────────────────────────────────────────────────────
-
 # ── Benchmarks ──────────────────────────────────────────────────────────────
 
 option(MEAS_BUILD_BENCHMARKS "Build format comparison benchmarks" OFF)
