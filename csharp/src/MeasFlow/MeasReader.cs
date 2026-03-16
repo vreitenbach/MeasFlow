@@ -1,11 +1,12 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
+using System.IO.MemoryMappedFiles;
 using MeasFlow.Format;
 using static MeasFlow.Format.SegmentCompressor;
 
 namespace MeasFlow;
 
 /// <summary>
-/// Reader for MEAS files. Reads metadata lazily, provides typed access to channels.
+/// Reader for MEAS files. Uses memory-mapped I/O for efficient access to large files.
 /// </summary>
 public sealed class MeasReader : IDisposable
 {
@@ -14,24 +15,41 @@ public sealed class MeasReader : IDisposable
     public IReadOnlyDictionary<string, MeasValue> Properties => _fileProperties;
     public MeasTimestamp CreatedAt => new(Header.CreatedAtNanos);
 
-    private readonly FileStream _stream;
+    private readonly MemoryMappedFile? _mmf;
+    private readonly MemoryMappedViewAccessor? _accessor;
     private readonly List<MeasGroup> _groups = [];
     private readonly Dictionary<string, MeasGroup> _groupsByName = [];
     private readonly Dictionary<string, MeasValue> _fileProperties = [];
-    private readonly List<MeasChannel> _allChannels = []; // flat list indexed by globalIndex
+    private readonly List<MeasChannel> _allChannels = [];
     private bool _disposed;
 
-    private MeasReader(FileStream stream)
+    private MeasReader(MemoryMappedFile mmf, MemoryMappedViewAccessor accessor)
     {
-        _stream = stream;
+        _mmf = mmf;
+        _accessor = accessor;
     }
 
+    /// <summary>
+    /// Open a .meas file using memory-mapped I/O. Supports concurrent reads while
+    /// another process is writing (the file is mapped read-only with FileShare.ReadWrite).
+    /// </summary>
     public static MeasReader Open(string path)
     {
-        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
-            bufferSize: 64 * 1024);
-        var reader = new MeasReader(stream);
-        reader.ReadFile();
+        var fileStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        long fileLength = fileStream.Length;
+
+        if (fileLength == 0)
+        {
+            fileStream.Dispose();
+            throw new InvalidDataException("File is empty.");
+        }
+
+        var mmf = MemoryMappedFile.CreateFromFile(fileStream, null, 0,
+            MemoryMappedFileAccess.Read, HandleInheritability.None, leaveOpen: false);
+        var accessor = mmf.CreateViewAccessor(0, fileLength, MemoryMappedFileAccess.Read);
+
+        var reader = new MeasReader(mmf, accessor);
+        reader.ReadFile(fileLength);
         return reader;
     }
 
@@ -43,40 +61,34 @@ public sealed class MeasReader : IDisposable
     public bool TryGetGroup(string name, out MeasGroup? group)
         => _groupsByName.TryGetValue(name, out group);
 
-    private void ReadFile()
+    private void ReadFile(long fileLength)
     {
-        // Read file header
         Span<byte> headerBuf = stackalloc byte[FileHeader.Size];
-        _stream.ReadExactly(headerBuf);
+        ReadBytes(0, headerBuf);
         Header = FileHeader.ReadFrom(headerBuf);
 
         // Walk segments using the forward-linked segment chain.
         // When SegmentCount > 0 (file closed normally), use it as the upper bound.
         // When SegmentCount == 0 (writer still open / streaming), walk until
         // we run out of readable data — this enables concurrent read while writing.
-        _stream.Seek(Header.FirstSegmentOffset, SeekOrigin.Begin);
-
-        long fileLength = _stream.Length;
         long maxSegments = Header.SegmentCount > 0 ? Header.SegmentCount : long.MaxValue;
+        long offset = Header.FirstSegmentOffset;
 
         Span<byte> segBuf = stackalloc byte[SegmentHeader.Size];
         for (long i = 0; i < maxSegments; i++)
         {
-            long segStart = _stream.Position;
-
-            // Not enough bytes left for a segment header → stop
-            if (segStart + SegmentHeader.Size > fileLength)
+            if (offset + SegmentHeader.Size > fileLength)
                 break;
 
-            _stream.ReadExactly(segBuf);
+            ReadBytes(offset, segBuf);
             var segHeader = SegmentHeader.ReadFrom(segBuf);
 
-            // Not enough bytes left for segment content → stop
-            if (segStart + SegmentHeader.Size + segHeader.ContentLength > fileLength)
+            long contentStart = offset + SegmentHeader.Size;
+            if (contentStart + segHeader.ContentLength > fileLength)
                 break;
 
             var content = new byte[segHeader.ContentLength];
-            _stream.ReadExactly(content);
+            ReadBytes(contentStart, content);
 
             // Decompress if segment is compressed
             var compression = FromFlags(segHeader.Flags);
@@ -93,10 +105,24 @@ public sealed class MeasReader : IDisposable
                     break;
             }
 
-            if (segHeader.NextSegmentOffset <= segStart)
-                break; // prevent infinite loops
-            _stream.Seek(segHeader.NextSegmentOffset, SeekOrigin.Begin);
+            if (segHeader.NextSegmentOffset <= offset)
+                break;
+            offset = segHeader.NextSegmentOffset;
         }
+    }
+
+    private void ReadBytes(long position, Span<byte> buffer)
+    {
+        _accessor!.ReadArray(position, _readTemp ??= new byte[buffer.Length], 0, buffer.Length);
+        _readTemp.AsSpan(0, buffer.Length).CopyTo(buffer);
+    }
+
+    // Reusable buffer for ReadArray calls (resized as needed)
+    private byte[]? _readTemp;
+
+    private void ReadBytes(long position, byte[] buffer)
+    {
+        _accessor!.ReadArray(position, buffer, 0, buffer.Length);
     }
 
     private void ProcessMetadata(byte[] content)
@@ -111,7 +137,6 @@ public sealed class MeasReader : IDisposable
             {
                 var channel = new MeasChannel(cd.Name, cd.DataType, globalIndex, cd.Properties);
                 channels.Add(channel);
-                // Ensure _allChannels list is large enough
                 while (_allChannels.Count <= globalIndex)
                     _allChannels.Add(null!);
                 _allChannels[globalIndex] = channel;
@@ -119,7 +144,6 @@ public sealed class MeasReader : IDisposable
             }
             var group = new MeasGroup(gd.Name, gd.Properties, channels);
 
-            // Deserialize bus definition if present
             if (gd.Properties.TryGetValue("meas.bus_def", out var busDefValue)
                 && busDefValue.Type == MeasDataType.Binary)
             {
@@ -157,6 +181,7 @@ public sealed class MeasReader : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        _stream.Dispose();
+        _accessor?.Dispose();
+        _mmf?.Dispose();
     }
 }

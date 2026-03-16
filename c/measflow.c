@@ -21,6 +21,14 @@
 #include <string.h>
 #include <time.h>
 
+/* Memory-mapped I/O headers (POSIX only; Windows uses winsock2.h/windows.h below) */
+#ifndef _WIN32
+#  include <sys/mman.h>
+#  include <sys/stat.h>
+#  include <fcntl.h>
+#  include <unistd.h>
+#endif
+
 #ifdef MEAS_HAVE_LZ4
 #  include <lz4.h>
 #endif
@@ -31,7 +39,8 @@
 /* ── Portability / endian helpers ────────────────────────────────────────── */
 
 #if defined(_WIN32)
-#  include <winsock2.h>   /* htonl, ntohl */
+#  include <winsock2.h>   /* htonl, ntohl — must precede windows.h */
+#  include <windows.h>    /* CreateFileMapping, MapViewOfFile */
 #  pragma comment(lib, "Ws2_32.lib")
 #elif defined(__APPLE__)
 #  include <machine/endian.h>
@@ -1830,6 +1839,15 @@ int meas_channel_next_ethernet_frame(const MeasChannelData *ch, int64_t *state,
 struct MeasReader {
     MeasGroupData *groups;
     int            group_count;
+    /* Memory-mapped file handles */
+#ifdef _WIN32
+    HANDLE  mmap_file;
+    HANDLE  mmap_mapping;
+    void   *mmap_base;
+#else
+    void   *mmap_base;
+    size_t  mmap_size;
+#endif
 };
 
 /* Append raw bytes to a channel's data array */
@@ -1909,19 +1927,34 @@ static int decode_data_segment(const uint8_t *buf, size_t bufsz,
 
 MeasReader *meas_reader_open(const char *path) {
     if (!path) return NULL;
-    FILE *f = fopen(path, "rb");
-    if (!f) return NULL;
 
-    /* Read entire file into memory */
-    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
-    long fsz_l = ftell(f);
-    if (fsz_l < 0) { fclose(f); return NULL; }
-    size_t fsz = (size_t)fsz_l;
-    rewind(f);
-    uint8_t *filebuf = (uint8_t *)malloc(fsz);
-    if (!filebuf) { fclose(f); return NULL; }
-    if (fread(filebuf, 1, fsz, f) != fsz) { free(filebuf); fclose(f); return NULL; }
-    fclose(f);
+    /* Memory-map the file for efficient read access */
+    uint8_t *filebuf = NULL;
+    size_t fsz = 0;
+#ifdef _WIN32
+    HANDLE hFile = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                               NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) return NULL;
+    LARGE_INTEGER li;
+    if (!GetFileSizeEx(hFile, &li)) { CloseHandle(hFile); return NULL; }
+    fsz = (size_t)li.QuadPart;
+    if (fsz == 0) { CloseHandle(hFile); return NULL; }
+    HANDLE hMap = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+    if (!hMap) { CloseHandle(hFile); return NULL; }
+    filebuf = (uint8_t *)MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
+    if (!filebuf) { CloseHandle(hMap); CloseHandle(hFile); return NULL; }
+    /* hFile and hMap kept open until reader is closed */
+#else
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return NULL;
+    struct stat st;
+    if (fstat(fd, &st) != 0) { close(fd); return NULL; }
+    fsz = (size_t)st.st_size;
+    if (fsz == 0) { close(fd); return NULL; }
+    filebuf = (uint8_t *)mmap(NULL, fsz, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (filebuf == MAP_FAILED) { close(fd); return NULL; }
+    close(fd); /* fd can be closed after mmap */
+#endif
 
     /* Validate file header (§4) */
     if (fsz < MEAS_FILE_HEADER_SIZE) { free(filebuf); return NULL; }
@@ -1934,7 +1967,23 @@ MeasReader *meas_reader_open(const char *path) {
     int64_t segment_count_hdr = (int64_t)read_le64(filebuf + 24);
 
     MeasReader *r = (MeasReader *)calloc(1, sizeof(MeasReader));
-    if (!r) { free(filebuf); return NULL; }
+    if (!r) {
+#ifdef _WIN32
+        UnmapViewOfFile(filebuf); CloseHandle(hMap); CloseHandle(hFile);
+#else
+        munmap(filebuf, fsz);
+#endif
+        return NULL;
+    }
+    /* Store mmap handles for cleanup in meas_reader_close() */
+#ifdef _WIN32
+    r->mmap_file = hFile;
+    r->mmap_mapping = hMap;
+    r->mmap_base = filebuf;
+#else
+    r->mmap_base = filebuf;
+    r->mmap_size = fsz;
+#endif
 
     /* Build a flat channel index — will be filled after metadata is decoded */
     MeasChannelData **flat_channels = NULL;
@@ -1999,7 +2048,7 @@ MeasReader *meas_reader_open(const char *path) {
     }
 
     free(flat_channels);
-    free(filebuf);
+    /* filebuf is memory-mapped — released in meas_reader_close() */
     return r;
 }
 
@@ -2018,6 +2067,14 @@ void meas_reader_close(MeasReader *reader) {
         free_properties(g->properties, g->property_count);
     }
     free(reader->groups);
+    /* Release memory mapping */
+#ifdef _WIN32
+    if (reader->mmap_base) UnmapViewOfFile(reader->mmap_base);
+    if (reader->mmap_mapping) CloseHandle(reader->mmap_mapping);
+    if (reader->mmap_file) CloseHandle(reader->mmap_file);
+#else
+    if (reader->mmap_base) munmap(reader->mmap_base, reader->mmap_size);
+#endif
     free(reader);
 }
 

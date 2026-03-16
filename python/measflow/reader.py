@@ -1,8 +1,9 @@
-"""Reader for the .meas binary format."""
+"""Reader for the .meas binary format using memory-mapped I/O."""
 
 from __future__ import annotations
 
 import math
+import mmap
 import struct
 from dataclasses import dataclass
 from typing import Any, Union
@@ -166,20 +167,36 @@ class MeasGroup:
 
 
 class MeasReader:
-    """Read a .meas file. Use as a context manager or construct directly."""
+    """Read a .meas file using memory-mapped I/O.
+
+    Memory mapping avoids copying the entire file into Python's heap,
+    letting the OS page in only the regions that are actually accessed.
+    Use as a context manager or construct directly.
+    """
 
     def __init__(self, path: str) -> None:
         self._path = path
         self.groups: list[MeasGroup] = []
         self.created_at: MeasTimestamp | None = None
         self._by_name: dict[str, MeasGroup] = {}
+        self._file = None
+        self._mm = None
         self._read()
 
     def __enter__(self) -> "MeasReader":
         return self
 
     def __exit__(self, *args: Any) -> None:
-        pass
+        self.close()
+
+    def close(self) -> None:
+        """Release the memory mapping and file handle."""
+        if self._mm is not None:
+            self._mm.close()
+            self._mm = None
+        if self._file is not None:
+            self._file.close()
+            self._file = None
 
     def __getitem__(self, name: str) -> MeasGroup:
         if name not in self._by_name:
@@ -187,13 +204,13 @@ class MeasReader:
         return self._by_name[name]
 
     def _read(self) -> None:
-        with open(self._path, "rb") as f:
-            data = f.read()
+        self._file = open(self._path, "rb")
+        self._mm = mmap.mmap(self._file.fileno(), 0, access=mmap.ACCESS_READ)
+        data = self._mm
 
         file_hdr = FileHeader.from_bytes(data)
         self.created_at = MeasTimestamp(file_hdr.created_at_nanos)
 
-        # channel_index → list of (sample_count, raw_bytes)
         channel_chunks: dict[int, list[tuple[int, bytes]]] = {}
         group_defs: list[GroupDef] = []
 
@@ -222,7 +239,6 @@ class MeasReader:
                 group_defs = decode_metadata(content)
             elif seg.type == SegmentType.DATA:
                 pos = 0
-                # Data content begins with [int32: chunkCount]
                 (chunk_count,) = struct.unpack_from("<i", content, pos)
                 pos += 4
                 for _ in range(chunk_count):

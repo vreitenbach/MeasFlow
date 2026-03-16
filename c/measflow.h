@@ -138,8 +138,8 @@ typedef struct MeasReader MeasReader;
 /* ── Reader API ────────────────────────────────────────────────────────────── */
 
 /**
- * Open a .meas file for reading.  Reads the entire file into memory and
- * parses all segments.
+ * Open a .meas file for reading using memory-mapped I/O.
+ * The file is mapped read-only; the OS pages in data on demand.
  * @return  Non-NULL handle on success; NULL on error (invalid file, OOM, etc.).
  */
 MeasReader *meas_reader_open(const char *path);
