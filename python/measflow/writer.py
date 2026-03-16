@@ -257,10 +257,19 @@ class GroupWriter:
         self._channels: list[ChannelWriter] = []
 
     def add_channel(
-        self, name: str, dtype: MeasDataType = MeasDataType.Float64
+        self, name: str, dtype: MeasDataType = MeasDataType.Float64,
+        *, track_statistics: bool = True,
     ) -> ChannelWriter:
-        """Add a typed channel to this group."""
+        """Add a typed channel to this group.
+
+        Args:
+            track_statistics: If False, disable automatic min/max/mean/stddev
+                computation.  Improves write performance when statistics are
+                not needed (e.g. format-comparison benchmarks).
+        """
         ch = ChannelWriter(name, dtype)
+        if not track_statistics:
+            ch._stats = None
         self._channels.append(ch)
         return ch
 

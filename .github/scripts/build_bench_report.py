@@ -152,6 +152,7 @@ def main():
 
     if has_xlang:
         out.append(f"### Cross-Language \u2014 {n:,} float32 samples\n")
+        out.append("> With statistics tracking enabled\n")
         out.append("| Operation | C | C# | Python |")
         out.append("|---|---|---|---|")
         for op, label in [("Write", "Write"), ("Read", "Read"), ("Stream", "Streaming Write")]:
@@ -188,6 +189,7 @@ def main():
 
     if hdf5_table_rows:
         out.append(f"### vs HDF5 \u2014 {n:,} samples\n")
+        out.append("> Without statistics tracking — pure I/O comparison\n")
         out.append("> Ratio = MeasFlow / HDF5 \u2014 lower is better "
                    "(\U0001f7e2 \u22641.5x, \U0001f7e1 \u22643x, \U0001f534 >3x)\n")
         out.append("| Operation | C | C# | Python |")

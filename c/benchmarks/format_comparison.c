@@ -82,6 +82,7 @@ static void write_measflow(const char *path, const float *data, int n)
     MeasWriter *w = meas_writer_open(path);
     MeasGroupWriter *g = meas_writer_add_group(w, "Data");
     MeasChannelWriter *ch = meas_group_add_channel(g, "Signal", MEAS_FLOAT32);
+    meas_channel_set_statistics(ch, 0);
     meas_channel_write_f32(ch, data, n);
     meas_writer_close(w);
 }
