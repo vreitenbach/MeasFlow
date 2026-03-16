@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   benchmark:
-    name: Cross-language benchmarks
+    name: Performance benchmarks
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -27,76 +27,138 @@ jobs:
           python-version: "3.12"
 
       - name: Install Python deps
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev]" h5py
         working-directory: python
 
-      - name: Install C vcpkg deps
-        run: vcpkg install lz4 zstd
+      - name: Install C vcpkg deps (with HDF5)
+        run: vcpkg install lz4 zstd hdf5
 
-      - name: Build C library + benchmarks
+      - name: Build C library + benchmarks (with HDF5)
         run: |
           cmake -B build -S c -DMEAS_BUILD_BENCHMARKS=ON \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
 
-      # ── Run benchmarks ───────────────────────────────────────────────────
+      # ── Cross-language benchmarks (MeasFlow only) ────────────────────────
       - name: C# cross-language benchmark
         run: |
           dotnet run --project csharp/benchmarks/MeasFlow.Benchmarks/MeasFlow.Benchmarks.csproj \
             -c Release -- --filter "*CrossLanguage*" --exporters GitHub \
-            > csharp_bench.txt 2>&1
+            > csharp_xlang.txt 2>&1
         continue-on-error: true
 
       - name: Python cross-language benchmark
-        run: python benchmarks/cross_language.py > ../python_bench.txt 2>&1
+        run: python benchmarks/cross_language.py > ../python_xlang.txt 2>&1
         working-directory: python
         continue-on-error: true
 
       - name: C cross-language benchmark
-        run: ./build/bench_cross_language > c_bench.txt 2>&1
+        run: ./build/bench_cross_language > c_xlang.txt 2>&1
+        continue-on-error: true
+
+      # ── Format comparison benchmarks (MeasFlow vs HDF5) ─────────────────
+      - name: C# format comparison benchmark
+        run: |
+          dotnet run --project csharp/benchmarks/MeasFlow.Benchmarks/MeasFlow.Benchmarks.csproj \
+            -c Release -- --filter "*FormatComparison*" --exporters GitHub \
+            > csharp_fmtcmp.txt 2>&1
+        continue-on-error: true
+
+      - name: Python format comparison benchmark
+        run: python benchmarks/format_comparison.py > ../python_fmtcmp.txt 2>&1
+        working-directory: python
+        continue-on-error: true
+
+      - name: C format comparison benchmark
+        run: ./build/bench_format_comparison > c_fmtcmp.txt 2>&1
         continue-on-error: true
 
       # ── Collect results ──────────────────────────────────────────────────
       - name: Build benchmark report
         run: |
-          cat <<'HEADER' > bench_report.md
+          cat > bench_report.md <<'HEADER'
           ## Benchmark Results
 
-          > Cross-language performance comparison (MeasFlow only, no HDF5).
-          > Numbers are indicative — CI runners have variable performance.
+          > Cross-language performance + MeasFlow vs HDF5 comparison.
+          > Numbers are indicative — CI runner performance varies between runs.
 
           HEADER
 
-          echo '### C#' >> bench_report.md
-          echo '```' >> bench_report.md
-          # Extract the summary table from BenchmarkDotNet output
-          if [ -f csharp_bench.txt ]; then
-            sed -n '/^\| Method/,/^$/p' csharp_bench.txt >> bench_report.md
-          else
-            echo "(benchmark did not run)" >> bench_report.md
-          fi
-          echo '```' >> bench_report.md
+          # ── Cross-language section ──
+          echo '### Cross-Language (MeasFlow only)' >> bench_report.md
           echo '' >> bench_report.md
 
-          echo '### Python' >> bench_report.md
-          echo '```' >> bench_report.md
-          if [ -f python_bench.txt ]; then
-            cat python_bench.txt >> bench_report.md
+          echo '<details><summary>C# (BenchmarkDotNet)</summary>' >> bench_report.md
+          echo '' >> bench_report.md
+          if [ -f csharp_xlang.txt ]; then
+            sed -n '/^\| Method/,/^$/p' csharp_xlang.txt >> bench_report.md
           else
-            echo "(benchmark did not run)" >> bench_report.md
+            echo '_(benchmark did not run)_' >> bench_report.md
           fi
-          echo '```' >> bench_report.md
+          echo '</details>' >> bench_report.md
           echo '' >> bench_report.md
 
-          echo '### C' >> bench_report.md
+          echo '<details><summary>Python</summary>' >> bench_report.md
+          echo '' >> bench_report.md
           echo '```' >> bench_report.md
-          if [ -f c_bench.txt ]; then
-            cat c_bench.txt >> bench_report.md
+          if [ -f python_xlang.txt ]; then
+            cat python_xlang.txt >> bench_report.md
           else
             echo "(benchmark did not run)" >> bench_report.md
           fi
           echo '```' >> bench_report.md
+          echo '</details>' >> bench_report.md
+          echo '' >> bench_report.md
+
+          echo '<details><summary>C</summary>' >> bench_report.md
+          echo '' >> bench_report.md
+          echo '```' >> bench_report.md
+          if [ -f c_xlang.txt ]; then
+            cat c_xlang.txt >> bench_report.md
+          else
+            echo "(benchmark did not run)" >> bench_report.md
+          fi
+          echo '```' >> bench_report.md
+          echo '</details>' >> bench_report.md
+          echo '' >> bench_report.md
+
+          # ── Format comparison section ──
+          echo '### Format Comparison (MeasFlow vs HDF5)' >> bench_report.md
+          echo '' >> bench_report.md
+
+          echo '<details><summary>C# — MeasFlow vs PureHDF (BenchmarkDotNet)</summary>' >> bench_report.md
+          echo '' >> bench_report.md
+          if [ -f csharp_fmtcmp.txt ]; then
+            sed -n '/^\| Method/,/^$/p' csharp_fmtcmp.txt >> bench_report.md
+          else
+            echo '_(benchmark did not run)_' >> bench_report.md
+          fi
+          echo '</details>' >> bench_report.md
+          echo '' >> bench_report.md
+
+          echo '<details><summary>Python — MeasFlow vs h5py</summary>' >> bench_report.md
+          echo '' >> bench_report.md
+          echo '```' >> bench_report.md
+          if [ -f python_fmtcmp.txt ]; then
+            cat python_fmtcmp.txt >> bench_report.md
+          else
+            echo "(benchmark did not run)" >> bench_report.md
+          fi
+          echo '```' >> bench_report.md
+          echo '</details>' >> bench_report.md
+          echo '' >> bench_report.md
+
+          echo '<details><summary>C — MeasFlow vs libhdf5</summary>' >> bench_report.md
+          echo '' >> bench_report.md
+          echo '```' >> bench_report.md
+          if [ -f c_fmtcmp.txt ]; then
+            cat c_fmtcmp.txt >> bench_report.md
+          else
+            echo "(benchmark did not run)" >> bench_report.md
+          fi
+          echo '```' >> bench_report.md
+          echo '</details>' >> bench_report.md
 
       - name: Upload benchmark report
         uses: actions/upload-artifact@v4
