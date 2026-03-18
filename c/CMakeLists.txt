@@ -7,11 +7,16 @@ include(GNUInstallDirs)
 
 # ── Library ──────────────────────────────────────────────────────────────────
 
-add_library(measflow STATIC measflow.c)
+add_library(measflow measflow.c)
 target_include_directories(measflow PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
+
+if(BUILD_SHARED_LIBS)
+    target_compile_definitions(measflow PUBLIC MEASFLOW_SHARED)
+    target_compile_definitions(measflow PRIVATE MEASFLOW_EXPORTS)
+endif()
 
 if(MSVC)
     target_compile_options(measflow PRIVATE /W4 /WX)
@@ -45,6 +50,7 @@ install(TARGETS measflow
     EXPORT measflow-targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 install(FILES measflow.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(EXPORT measflow-targets
