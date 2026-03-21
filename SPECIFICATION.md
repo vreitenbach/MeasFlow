@@ -303,6 +303,8 @@ Property :=
 
 ### Reserved property keys
 
+Property keys are case-sensitive. The canonical on-disk form for statistics keys is lowercase `meas.stats.*`, matching all existing implementations.
+
 | Key                    | Type      | Description                              |
 |------------------------|-----------|------------------------------------------|
 | `MEAS.bus_def`          | Binary    | Serialized bus channel definition (§10)  |
@@ -311,15 +313,15 @@ Property :=
 | `MEAS.bit_length`       | Int32     | Signal bit length                        |
 | `MEAS.factor`           | Float64   | Signal scaling factor                    |
 | `MEAS.offset`           | Float64   | Signal scaling offset                    |
-| `MEAS.stats.count`      | Int64     | Sample count (statistics)                |
-| `MEAS.stats.min`        | Float64   | Minimum value                            |
-| `MEAS.stats.max`        | Float64   | Maximum value                            |
-| `MEAS.stats.sum`        | Float64   | Sum of all values                        |
-| `MEAS.stats.mean`       | Float64   | Arithmetic mean                          |
-| `MEAS.stats.variance`   | Float64   | Population variance                      |
-| `MEAS.stats.stddev`     | Float64   | Population standard deviation            |
-| `MEAS.stats.first`      | Float64   | First sample value                       |
-| `MEAS.stats.last`       | Float64   | Last sample value                        |
+| `meas.stats.count`      | Int64     | Sample count (statistics)                |
+| `meas.stats.min`        | Float64   | Minimum value                            |
+| `meas.stats.max`        | Float64   | Maximum value                            |
+| `meas.stats.sum`        | Float64   | Sum of all values                        |
+| `meas.stats.mean`       | Float64   | Arithmetic mean                          |
+| `meas.stats.variance`   | Float64   | Population variance                      |
+| `meas.stats.stddev`     | Float64   | Population standard deviation            |
+| `meas.stats.first`      | Float64   | First sample value                       |
+| `meas.stats.last`       | Float64   | Last sample value                        |
 
 ---
 
@@ -589,7 +591,7 @@ A conforming writer MUST support incremental flushing:
 4. **Subsequent flushes**: Each `Flush()` writes a new Data segment with only the data buffered since the last flush.
 5. **Close**: Write any remaining buffered data as a final Data segment. Then seek back to patch two locations:
    - The file header at offset 0: write the final `SegmentCount`.
-   - The Metadata segment content: overwrite the `MEAS.stats.*` channel properties with the final accumulated statistics (see §12.5).
+   - The Metadata segment content: overwrite the `meas.stats.*` channel properties with the final accumulated statistics (see §12.5).
 
 **Memory invariant**: After each flush, the writer's internal buffers are cleared. A writer streaming 10 GB of data needs only O(chunk_size) memory at any time.
 
@@ -627,7 +629,7 @@ The segment-based design allows concurrent access:
 Channel statistics (min, max, mean, variance, count) are computed incrementally using **Welford's online algorithm** during writes. This means:
 
 - Statistics are updated in memory after every sample write — no buffering of raw data needed.
-- On `Close()`, the writer **seeks back** to the Metadata segment and overwrites the `MEAS.stats.*` channel properties in-place with the final accumulated values.
+- On `Close()`, the writer **seeks back** to the Metadata segment and overwrites the `meas.stats.*` channel properties in-place with the final accumulated values.
 - A reader opened after `Close()` can access statistics **without reading any data chunks**.
 
 **Patch-on-close design**: The Metadata segment is written first (with zeroed/absent statistics) and then patched at the end. This requires the backing storage to be **seekable** (a regular file). Pure pipe or non-seekable stream writers MUST omit statistics properties entirely rather than writing incorrect values.
@@ -653,7 +655,7 @@ For each new sample x:
   last = x
 ```
 
-Statistics are stored as channel properties with `MEAS.stats.*` keys (see §9).
+Statistics are stored as channel properties with `meas.stats.*` keys (see §9).
 
 ---
 
@@ -668,13 +670,13 @@ A conforming writer MUST:
 - Use little-endian encoding for all multi-byte values
 - Store valid `NextSegmentOffset` in every segment header
 - Update `SegmentCount` in the file header on close
-- Seek back and patch the Metadata segment with final `MEAS.stats.*` channel properties on close (patch-on-close; see §12.5)
+- Seek back and patch the Metadata segment with final `meas.stats.*` channel properties on close (patch-on-close; see §12.5)
 
 A conforming writer SHOULD:
 - Support incremental flushing (streaming writes)
 - Compute and store channel statistics for numeric channels
 - Use 64 KB buffer size for file I/O
-- Omit `MEAS.stats.*` properties entirely when writing to a non-seekable stream
+- Omit `meas.stats.*` properties entirely when writing to a non-seekable stream
 
 ### Reader conformance
 

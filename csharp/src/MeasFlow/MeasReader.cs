@@ -147,7 +147,8 @@ public sealed class MeasReader : IDisposable
             }
             var group = new MeasGroup(gd.Name, gd.Properties, channels);
 
-            if (gd.Properties.TryGetValue("MEAS.bus_def", out var busDefValue)
+            if ((gd.Properties.TryGetValue("MEAS.bus_def", out var busDefValue)
+                || gd.Properties.TryGetValue("meas.bus_def", out busDefValue))
                 && busDefValue.Type == MeasDataType.Binary)
             {
                 group.BusDefinition = BusMetadataEncoder.Decode(busDefValue.AsBinary());

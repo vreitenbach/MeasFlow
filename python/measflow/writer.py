@@ -166,6 +166,10 @@ class _FrozenDict(dict):
         self._check_frozen()
         return super().setdefault(key, default)
 
+    def popitem(self) -> tuple[Any, Any]:
+        self._check_frozen()
+        return super().popitem()
+
 
 class ChannelWriter:
     """Buffers samples for a single channel."""

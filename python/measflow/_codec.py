@@ -252,6 +252,10 @@ def decode_metadata(data: bytes,
             raise ValueError(
                 f"Unsupported metadata version {major}.{minor} "
                 f"(max supported: {META_MAJOR}.{META_MINOR})")
+        if major == META_MAJOR and minor > META_MINOR:
+            raise ValueError(
+                f"Unsupported metadata minor version {major}.{minor} "
+                f"(max supported: {META_MAJOR}.{META_MINOR})")
         props, offset = decode_properties(data, offset)
         if file_properties_out is not None:
             file_properties_out.update(props)

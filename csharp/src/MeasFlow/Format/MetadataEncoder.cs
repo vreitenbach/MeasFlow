@@ -78,6 +78,10 @@ internal static class MetadataEncoder
                 throw new InvalidDataException(
                     $"Unsupported metadata version {major}.{minor} (max supported: {MetaMajor}.{MetaMinor})");
 
+            if (major == MetaMajor && minor > MetaMinor)
+                throw new InvalidDataException(
+                    $"Unsupported metadata minor version {major}.{minor} (max supported: {MetaMajor}.{MetaMinor})");
+
             // File-level properties follow for all supported versions (currently 0.1).
             var fileProps = ReadProperties(data, ref offset);
             if (filePropertiesOut != null)

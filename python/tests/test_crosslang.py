@@ -183,6 +183,20 @@ def verify_reference_file(path: str, writer_lang: str) -> None:
         if unit_prop is not None:
             assert str(unit_prop.value if hasattr(unit_prop, "value") else unit_prop) == "1/min"
 
+        # ── CAN_Test group ──
+        can_grp = r["CAN_Test"]
+        assert "MEAS.bus_def" in can_grp.properties, f"[{writer_lang}] MEAS.bus_def missing"
+        bus_def = can_grp.properties["MEAS.bus_def"]
+        assert bus_def.value is not None and len(bus_def.value) > 0, (
+            f"[{writer_lang}] MEAS.bus_def empty")
+
+        raw_ch = can_grp["RawFrames"]
+        ts_can = can_grp["Timestamps"]
+        assert raw_ch.sample_count == CAN_FRAME_COUNT, (
+            f"[{writer_lang}] RawFrames count={raw_ch.sample_count}, expected {CAN_FRAME_COUNT}")
+        assert ts_can.sample_count == CAN_FRAME_COUNT, (
+            f"[{writer_lang}] Timestamps count={ts_can.sample_count}, expected {CAN_FRAME_COUNT}")
+
 
 # ── Test cases ───────────────────────────────────────────────────────────────
 

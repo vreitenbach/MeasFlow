@@ -2369,9 +2369,7 @@ static int decode_metadata_segment(MeasReader *r, const uint8_t *buf, size_t buf
         if (off + 2 > bufsz) return 0;
         uint8_t metaMajor = buf[off++];
         uint8_t metaMinor = buf[off++];
-        (void)metaMinor; /* currently unused beyond validation */
-        /* We support metaMajor == 0 only */
-        if (metaMajor != 0) return 0;
+        if (metaMajor != 0 || metaMinor > 1) return 0;
         /* Decode file-level properties */
         if (!decode_properties(buf, bufsz, &off, &r->file_props, &r->file_prop_count))
             return 0;
