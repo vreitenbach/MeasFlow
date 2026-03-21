@@ -18,14 +18,14 @@ public sealed class BusGroupWriter
     internal BusGroupWriter(GroupWriter group, BusConfig busConfig)
     {
         _group = group;
-        _timestampChannel = group.AddChannel<MeasTimestamp>("Timestamp");
+        _timestampChannel = group.AddChannel<MeasTimestamp>("Timestamps");
         _rawChannel = group.AddRawChannel("RawFrames");
 
         BusDefinition = new BusChannelDefinition
         {
             BusConfig = busConfig,
             RawFrameChannelName = "RawFrames",
-            TimestampChannelName = "Timestamp",
+            TimestampChannelName = "Timestamps",
         };
     }
 

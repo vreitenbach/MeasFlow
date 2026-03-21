@@ -21,6 +21,7 @@ from measflow._codec import (
     CHUNK_HEADER_FMT,
     FILE_HEADER_SIZE,
     SEGMENT_HEADER_SIZE,
+    FLAG_EXTENDED_METADATA,
 )
 
 
@@ -127,13 +128,56 @@ class _StatisticsAccumulator:
         props["meas.stats.last"] = MeasValue(MeasDataType.Float64, 0.0)
 
 
+class _FrozenDict(dict):
+    """A dict subclass that raises on mutation after being frozen."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._frozen = False
+
+    def _check_frozen(self) -> None:
+        if self._frozen:
+            raise RuntimeError(
+                "Cannot modify properties after metadata has been written. "
+                "Set all properties before writing any data or calling flush()."
+            )
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        self._check_frozen()
+        super().__setitem__(key, value)
+
+    def __delitem__(self, key: Any) -> None:
+        self._check_frozen()
+        super().__delitem__(key)
+
+    def update(self, *args: Any, **kwargs: Any) -> None:
+        self._check_frozen()
+        super().update(*args, **kwargs)
+
+    def pop(self, *args: Any) -> Any:
+        self._check_frozen()
+        return super().pop(*args)
+
+    def clear(self) -> None:
+        self._check_frozen()
+        super().clear()
+
+    def setdefault(self, key: Any, default: Any = None) -> Any:
+        self._check_frozen()
+        return super().setdefault(key, default)
+
+    def popitem(self) -> tuple[Any, Any]:
+        self._check_frozen()
+        return super().popitem()
+
+
 class ChannelWriter:
     """Buffers samples for a single channel."""
 
     def __init__(self, name: str, dtype: MeasDataType) -> None:
         self.name = name
         self.data_type = dtype
-        self.properties: dict[str, Any] = {}
+        self.properties: dict[str, Any] = _FrozenDict()
         self._global_index: int = 0  # assigned when metadata is written
         self._buffers: list[bytes] = []  # pre-serialized byte chunks
         self._sample_count: int = 0
@@ -253,7 +297,7 @@ class GroupWriter:
 
     def __init__(self, name: str) -> None:
         self.name = name
-        self.properties: dict[str, Any] = {}
+        self.properties: dict[str, Any] = _FrozenDict()
         self._channels: list[ChannelWriter] = []
 
     def add_channel(
@@ -308,6 +352,8 @@ class MeasWriter:
         self._metadata_content_offset: int = 0  # file offset of metadata content
         self._created_ns = time.time_ns()
         self._file_id = uuid.uuid4().bytes
+        self.properties: dict[str, Any] = _FrozenDict()
+        self._metadata_content_length: int = 0  # original encoded metadata size
         # Open file immediately and write placeholder header
         self._file = open(path, "wb")
         self._file.write(b"\x00" * FILE_HEADER_SIZE)
@@ -352,6 +398,7 @@ class MeasWriter:
                 created_at_nanos=self._created_ns,
                 segment_count=self._segment_count,
                 file_id=self._file_id,
+                flags=getattr(self, '_header_flags', 0),
             )
             self._file.seek(0)
             self._file.write(hdr.to_bytes())
@@ -366,6 +413,18 @@ class MeasWriter:
 
     # ── Internal helpers ─────────────────────────────────────────────────────
 
+    @property
+    def _has_file_properties(self) -> bool:
+        return bool(self.properties)
+
+    def _file_props_encoded(self) -> dict[str, MeasValue] | None:
+        if not self.properties:
+            return None
+        return {
+            k: (v if isinstance(v, MeasValue) else MeasValue.from_python(v))
+            for k, v in self.properties.items()
+        }
+
     def _ensure_metadata(self) -> None:
         if self._metadata_written:
             return
@@ -376,23 +435,50 @@ class MeasWriter:
             for ch in g._channels:
                 ch._global_index = global_idx
                 global_idx += 1
+        # Always write extended metadata format
+        self._header_flags = FLAG_EXTENDED_METADATA
         # Write actual file header (replace placeholder)
         hdr = FileHeader(
             created_at_nanos=self._created_ns,
             segment_count=0,
             file_id=self._file_id,
+            flags=self._header_flags,
         )
         self._file.seek(0)
         self._file.write(hdr.to_bytes())
         self._file.seek(0, 2)  # seek to end
         # Write metadata segment with placeholder stats (will be patched on close)
-        meta_content = encode_metadata([g._to_group_def(with_stats=False) for g in self._groups])
+        meta_content = encode_metadata(
+            [g._to_group_def(with_stats=False) for g in self._groups],
+            file_properties=self._file_props_encoded(),
+            extended=True,
+        )
         self._metadata_content_offset = self._file.tell() + SEGMENT_HEADER_SIZE
+        self._metadata_content_length = len(meta_content)
         self._write_segment(SegmentType.METADATA, meta_content, chunk_count=0)
+        # Freeze all property dicts so mutations cannot change metadata size
+        if isinstance(self.properties, _FrozenDict):
+            self.properties._frozen = True
+        for g in self._groups:
+            if isinstance(g.properties, _FrozenDict):
+                g.properties._frozen = True
+            for ch in g._channels:
+                if isinstance(ch.properties, _FrozenDict):
+                    ch.properties._frozen = True
 
     def _patch_metadata_stats(self) -> None:
         """Overwrite the metadata segment content with final statistics in-place."""
-        final_meta = encode_metadata([g._to_group_def(with_stats=True) for g in self._groups])
+        final_meta = encode_metadata(
+            [g._to_group_def(with_stats=True) for g in self._groups],
+            file_properties=self._file_props_encoded(),
+            extended=True,
+        )
+        if len(final_meta) != self._metadata_content_length:
+            raise RuntimeError(
+                f"Metadata size changed during repatch: original "
+                f"{self._metadata_content_length} bytes, new {len(final_meta)} bytes. "
+                f"This indicates properties were mutated after metadata was written."
+            )
         self._file.seek(self._metadata_content_offset)
         self._file.write(final_meta)
         self._file.seek(0, 2)  # seek back to end
