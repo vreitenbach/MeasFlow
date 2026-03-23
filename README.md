@@ -82,14 +82,14 @@ cd c
 # With compression (requires lz4 + zstd via vcpkg):
 cmake -B build -DMEAS_BUILD_QUICKSTART=ON \
   -DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake
-cmake --build build
-
-# Without compression:
-cmake -B build -DMEAS_BUILD_QUICKSTART=ON \
-  -DMEAS_WITH_LZ4=OFF -DMEAS_WITH_ZSTD=OFF
-cmake --build build
-
+cmake --build build --config Release
 ./build/quickstart
+
+# Or without compression:
+cmake -B build-nocompress -DMEAS_BUILD_QUICKSTART=ON \
+  -DMEAS_WITH_LZ4=OFF -DMEAS_WITH_ZSTD=OFF
+cmake --build build-nocompress --config Release
+./build-nocompress/quickstart
 ```
 
 ## Features
@@ -240,8 +240,11 @@ cmake --build build --config Release
 ./build/bench_cross_language                  # Cross-language comparison
 
 # Without compression dependencies:
-cmake -B build -S c -DMEAS_BUILD_BENCHMARKS=ON \
+cmake -B build-nocompress -S c -DMEAS_BUILD_BENCHMARKS=ON \
   -DMEAS_WITH_LZ4=OFF -DMEAS_WITH_ZSTD=OFF
+cmake --build build-nocompress --config Release
+./build-nocompress/bench_format_comparison    # MeasFlow-only
+./build-nocompress/bench_cross_language       # Cross-language comparison
 ```
 
 ## Project Structure

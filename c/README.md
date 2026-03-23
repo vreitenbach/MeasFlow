@@ -31,14 +31,14 @@ cd c/
 # With compression (default — requires lz4 + zstd):
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake
-cmake --build build
-ctest --test-dir build
+cmake --build build --config Release
+ctest --test-dir build -C Release
 
-# Without compression:
-cmake -B build -DCMAKE_BUILD_TYPE=Release \
+# Or without compression:
+cmake -B build-nocompress -DCMAKE_BUILD_TYPE=Release \
   -DMEAS_WITH_LZ4=OFF -DMEAS_WITH_ZSTD=OFF
-cmake --build build
-ctest --test-dir build
+cmake --build build-nocompress --config Release
+ctest --test-dir build-nocompress -C Release
 ```
 
 | CMake Option | Default | Description |
