@@ -92,6 +92,10 @@ cmake --build build-nocompress
 ./build-nocompress/quickstart
 ```
 
+> **Note:** `CMAKE_BUILD_TYPE` is for single-config generators (Ninja, Make).
+> For multi-config generators (Visual Studio, Xcode), add `--config Release` to build
+> commands and find binaries under `<build-dir>/Release/`. See [`c/README.md`](c/README.md) for details.
+
 ## Features
 
 ### Core

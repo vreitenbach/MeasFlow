@@ -50,8 +50,8 @@ ctest --test-dir build-nocompress
 | `MEAS_BUILD_BENCHMARKS` | `OFF` | Build benchmarks (optional HDF5) |
 
 > **Note:** `CMAKE_BUILD_TYPE` applies to single-config generators (Ninja, Make).
-> For multi-config generators (Visual Studio, Xcode), use `cmake --build build --config Release`
-> and `ctest --test-dir build -C Release` instead.
+> For multi-config generators (Visual Studio, Xcode), use `cmake --build <build-dir> --config Release`
+> and `ctest --test-dir <build-dir> -C Release` instead. Binaries will be in `<build-dir>/Release/`.
 
 To compile without CMake (no compression):
 
