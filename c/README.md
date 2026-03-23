@@ -31,14 +31,14 @@ cd c/
 # With compression (default — requires lz4 + zstd):
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake
-cmake --build build --config Release
-ctest --test-dir build -C Release
+cmake --build build
+ctest --test-dir build
 
 # Or without compression:
 cmake -B build-nocompress -DCMAKE_BUILD_TYPE=Release \
   -DMEAS_WITH_LZ4=OFF -DMEAS_WITH_ZSTD=OFF
-cmake --build build-nocompress --config Release
-ctest --test-dir build-nocompress -C Release
+cmake --build build-nocompress
+ctest --test-dir build-nocompress
 ```
 
 | CMake Option | Default | Description |
@@ -48,6 +48,10 @@ ctest --test-dir build-nocompress -C Release
 | `MEAS_BUILD_TESTS` | `ON` | Build unit tests |
 | `MEAS_BUILD_QUICKSTART` | `OFF` | Build quickstart example |
 | `MEAS_BUILD_BENCHMARKS` | `OFF` | Build benchmarks (optional HDF5) |
+
+> **Note:** `CMAKE_BUILD_TYPE` applies to single-config generators (Ninja, Make).
+> For multi-config generators (Visual Studio, Xcode), use `cmake --build build --config Release`
+> and `ctest --test-dir build -C Release` instead.
 
 To compile without CMake (no compression):
 
