@@ -80,17 +80,21 @@ To use measflow via vcpkg, add a `vcpkg-configuration.json` to your project (req
 cd c
 
 # With compression (requires lz4 + zstd via vcpkg):
-cmake -B build -DMEAS_BUILD_QUICKSTART=ON \
+cmake -B build -DMEAS_BUILD_QUICKSTART=ON -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake
 cmake --build build
-
-# Without compression:
-cmake -B build -DMEAS_BUILD_QUICKSTART=ON \
-  -DMEAS_WITH_LZ4=OFF -DMEAS_WITH_ZSTD=OFF
-cmake --build build
-
 ./build/quickstart
+
+# Or without compression:
+cmake -B build-nocompress -DMEAS_BUILD_QUICKSTART=ON -DCMAKE_BUILD_TYPE=Release \
+  -DMEAS_WITH_LZ4=OFF -DMEAS_WITH_ZSTD=OFF
+cmake --build build-nocompress
+./build-nocompress/quickstart
 ```
+
+> **Note:** `CMAKE_BUILD_TYPE` is for single-config generators (Ninja, Make).
+> For multi-config generators (Visual Studio, Xcode), add `--config Release` to build
+> commands and find binaries under `<build-dir>/Release/`. See [`c/README.md`](c/README.md) for details.
 
 ## Features
 
@@ -233,15 +237,18 @@ python benchmarks/cross_language.py           # Cross-language comparison
 
 ```bash
 # With HDF5 comparison (requires vcpkg: hdf5, lz4, zstd):
-cmake -B build -S c -DMEAS_BUILD_BENCHMARKS=ON \
+cmake -B build -S c -DMEAS_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake
-cmake --build build --config Release
+cmake --build build
 ./build/bench_format_comparison               # MeasFlow vs HDF5 (libhdf5)
 ./build/bench_cross_language                  # Cross-language comparison
 
 # Without compression dependencies:
-cmake -B build -S c -DMEAS_BUILD_BENCHMARKS=ON \
+cmake -B build-nocompress -S c -DMEAS_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release \
   -DMEAS_WITH_LZ4=OFF -DMEAS_WITH_ZSTD=OFF
+cmake --build build-nocompress
+./build-nocompress/bench_format_comparison    # MeasFlow-only
+./build-nocompress/bench_cross_language       # Cross-language comparison
 ```
 
 ## Project Structure

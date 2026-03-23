@@ -34,11 +34,11 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
 cmake --build build
 ctest --test-dir build
 
-# Without compression:
-cmake -B build -DCMAKE_BUILD_TYPE=Release \
+# Or without compression:
+cmake -B build-nocompress -DCMAKE_BUILD_TYPE=Release \
   -DMEAS_WITH_LZ4=OFF -DMEAS_WITH_ZSTD=OFF
-cmake --build build
-ctest --test-dir build
+cmake --build build-nocompress
+ctest --test-dir build-nocompress
 ```
 
 | CMake Option | Default | Description |
@@ -48,6 +48,10 @@ ctest --test-dir build
 | `MEAS_BUILD_TESTS` | `ON` | Build unit tests |
 | `MEAS_BUILD_QUICKSTART` | `OFF` | Build quickstart example |
 | `MEAS_BUILD_BENCHMARKS` | `OFF` | Build benchmarks (optional HDF5) |
+
+> **Note:** `CMAKE_BUILD_TYPE` applies to single-config generators (Ninja, Make).
+> For multi-config generators (Visual Studio, Xcode), use `cmake --build <build-dir> --config Release`
+> and `ctest --test-dir <build-dir> -C Release` instead. Binaries will be in `<build-dir>/Release/`.
 
 To compile without CMake (no compression):
 
