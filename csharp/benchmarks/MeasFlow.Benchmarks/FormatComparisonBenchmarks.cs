@@ -25,6 +25,8 @@ public class FormatComparisonBenchmarks
     private float[] _data = null!;
     private string _measFile = null!;
     private string _hdf5File = null!;
+    private string _measFile10 = null!;
+    private string _hdf5File10 = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -43,6 +45,13 @@ public class FormatComparisonBenchmarks
 
         _hdf5File = Path.Combine(_tempDir, "read.h5");
         WriteHdf5File(_hdf5File, _data);
+
+        // Pre-create 10-channel files for read benchmarks
+        _measFile10 = Path.Combine(_tempDir, "read10.meas");
+        WriteMeasFlow10ch(_measFile10, _data);
+
+        _hdf5File10 = Path.Combine(_tempDir, "read10.h5");
+        WriteHdf510ch(_hdf5File10, _data);
     }
 
     [GlobalCleanup]
@@ -76,16 +85,7 @@ public class FormatComparisonBenchmarks
     public long Write_MeasFlow_10ch()
     {
         var path = Path.Combine(_tempDir, $"w10_{SampleCount}.meas");
-        using var writer = MeasFile.CreateWriter(path);
-        var group = writer.AddGroup("Data");
-        var channels = new ChannelWriter<float>[10];
-        for (int c = 0; c < 10; c++)
-            channels[c] = group.AddChannel<float>($"Ch{c}", trackStatistics: false);
-
-        for (int i = 0; i < SampleCount; i++)
-            for (int c = 0; c < 10; c++)
-                channels[c].Write(_data[i]);
-
+        WriteMeasFlow10ch(path, _data);
         return new FileInfo(path).Length;
     }
 
@@ -116,6 +116,29 @@ public class FormatComparisonBenchmarks
         using var file = H5File.OpenRead(_hdf5File);
         var dataset = file.Dataset("/Data/Signal");
         return dataset.Read<float[]>();
+    }
+
+    // ── Read: 10 Channels ─────────────────────────────────────────────
+
+    [BenchmarkCategory("Read 10ch"), Benchmark(Description = "MeasFlow")]
+    public float[] Read_MeasFlow_10ch()
+    {
+        using var reader = MeasFile.OpenRead(_measFile10);
+        float[] last = null!;
+        var group = reader["Data"];
+        for (int c = 0; c < 10; c++)
+            last = group[$"Ch{c}"].ReadAll<float>();
+        return last;
+    }
+
+    [BenchmarkCategory("Read 10ch"), Benchmark(Description = "HDF5 (PureHDF)")]
+    public float[] Read_HDF5_10ch()
+    {
+        using var file = H5File.OpenRead(_hdf5File10);
+        float[] last = null!;
+        for (int c = 0; c < 10; c++)
+            last = file.Dataset($"/Data/Ch{c}").Read<float[]>();
+        return last;
     }
 
     // ── Streaming Write (incremental flush) ──────────────────────────────
@@ -186,11 +209,30 @@ public class FormatComparisonBenchmarks
         ch.Write(data.AsSpan());
     }
 
+    private static void WriteMeasFlow10ch(string path, float[] data)
+    {
+        using var writer = MeasFile.CreateWriter(path);
+        var group = writer.AddGroup("Data");
+        for (int c = 0; c < 10; c++)
+        {
+            var ch = group.AddChannel<float>($"Ch{c}", trackStatistics: false);
+            ch.Write(data.AsSpan());
+        }
+    }
+
     private static void WriteHdf5File(string path, float[] data)
     {
         new H5File
         {
             ["Data"] = new H5Group { ["Signal"] = data }
         }.Write(path);
+    }
+
+    private static void WriteHdf510ch(string path, float[] data)
+    {
+        var group = new H5Group();
+        for (int c = 0; c < 10; c++)
+            group[$"Ch{c}"] = data;
+        new H5File { ["Data"] = group }.Write(path);
     }
 }

@@ -1060,25 +1060,23 @@ void meas_writer_close(MeasWriter *writer) {
 
 /* ── Batch statistics helpers ────────────────────────────────────────────── */
 
-/* Batch stats for float32 arrays: min/max/sum in one pass, then parallel
-   Welford merge.  Avoids per-element division. */
+/* Batch stats for float32 arrays: single-pass min/max/sum + Welford M2.
+   Computes all statistics in one traversal of the data. */
 static void stats_update_f32_bulk(StatsAcc *s, const float *data, int64_t count) {
     if (!s->active || count == 0) return;
     double batch_min = (double)data[0], batch_max = batch_min;
     double batch_sum = 0.0;
+    double batch_mean = 0.0, batch_m2 = 0.0;
     for (int64_t i = 0; i < count; i++) {
         double v = (double)data[i];
         if (v < batch_min) batch_min = v;
         if (v > batch_max) batch_max = v;
         batch_sum += v;
-    }
-    double batch_mean = batch_sum / (double)count;
-    double batch_m2 = 0.0;
-    if (count > 1) {
-        for (int64_t i = 0; i < count; i++) {
-            double d = (double)data[i] - batch_mean;
-            batch_m2 += d * d;
-        }
+        /* Online Welford within batch */
+        double d1 = v - batch_mean;
+        batch_mean += d1 / (double)(i + 1);
+        double d2 = v - batch_mean;
+        batch_m2 += d1 * d2;
     }
     if (s->count == 0) {
         s->first = (double)data[0];
@@ -1102,19 +1100,16 @@ static void stats_update_f64_bulk(StatsAcc *s, const double *data, int64_t count
     if (!s->active || count == 0) return;
     double batch_min = data[0], batch_max = data[0];
     double batch_sum = 0.0;
+    double batch_mean = 0.0, batch_m2 = 0.0;
     for (int64_t i = 0; i < count; i++) {
         double v = data[i];
         if (v < batch_min) batch_min = v;
         if (v > batch_max) batch_max = v;
         batch_sum += v;
-    }
-    double batch_mean = batch_sum / (double)count;
-    double batch_m2 = 0.0;
-    if (count > 1) {
-        for (int64_t i = 0; i < count; i++) {
-            double d = data[i] - batch_mean;
-            batch_m2 += d * d;
-        }
+        double d1 = v - batch_mean;
+        batch_mean += d1 / (double)(i + 1);
+        double d2 = v - batch_mean;
+        batch_m2 += d1 * d2;
     }
     if (s->count == 0) {
         s->first = data[0];
@@ -1134,26 +1129,24 @@ static void stats_update_f64_bulk(StatsAcc *s, const double *data, int64_t count
     s->count = new_count;
 }
 
-/* Generic batch stats for integer types (converted to double). */
+/* Generic batch stats for integer types (converted to double).
+   Single-pass: min/max/sum + online Welford M2. */
 #define DEFINE_STATS_BULK_INT(SUFFIX, CTYPE)                                   \
 static void stats_update_##SUFFIX##_bulk(StatsAcc *s, const CTYPE *data,       \
                                           int64_t count) {                     \
     if (!s->active || count == 0) return;                                      \
     double batch_min = (double)data[0], batch_max = batch_min;                 \
     double batch_sum = 0.0;                                                    \
+    double batch_mean = 0.0, batch_m2 = 0.0;                                  \
     for (int64_t i = 0; i < count; i++) {                                      \
         double v = (double)data[i];                                            \
         if (v < batch_min) batch_min = v;                                      \
         if (v > batch_max) batch_max = v;                                      \
         batch_sum += v;                                                        \
-    }                                                                          \
-    double batch_mean = batch_sum / (double)count;                             \
-    double batch_m2 = 0.0;                                                     \
-    if (count > 1) {                                                           \
-        for (int64_t i = 0; i < count; i++) {                                  \
-            double d = (double)data[i] - batch_mean;                           \
-            batch_m2 += d * d;                                                 \
-        }                                                                      \
+        double d1 = v - batch_mean;                                            \
+        batch_mean += d1 / (double)(i + 1);                                    \
+        double d2 = v - batch_mean;                                            \
+        batch_m2 += d1 * d2;                                                   \
     }                                                                          \
     if (s->count == 0) {                                                       \
         s->first = (double)data[0]; s->min = batch_min; s->max = batch_max;   \
