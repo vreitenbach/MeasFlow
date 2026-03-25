@@ -27,7 +27,8 @@ classifiers = [
 dependencies = ["numpy>=1.24"]
 
 [project.urls]
-Homepage = "https://github.com/vreitenbach/MeasFlow"
+Homepage = "https://vreitenbach.github.io/MeasFlow/"
+Documentation = "https://vreitenbach.github.io/MeasFlow/"
 Repository = "https://github.com/vreitenbach/MeasFlow"
 Issues = "https://github.com/vreitenbach/MeasFlow/issues"
 

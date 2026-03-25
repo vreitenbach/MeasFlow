@@ -11,7 +11,7 @@
     <Authors>vreitenbach</Authors>
     <Description>High-performance binary measurement data format — .NET reader/writer with streaming, compression (LZ4/Zstd), bus data (CAN/LIN/FlexRay/Ethernet), and channel statistics.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/vreitenbach/MeasFlow</PackageProjectUrl>
+    <PackageProjectUrl>https://vreitenbach.github.io/MeasFlow/</PackageProjectUrl>
     <RepositoryUrl>https://github.com/vreitenbach/MeasFlow</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>measurement;binary;streaming;lz4;zstd;can;lin;flexray;automotive</PackageTags>
