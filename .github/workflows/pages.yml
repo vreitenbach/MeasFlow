@@ -1,5 +1,9 @@
 name: Deploy GitHub Pages
 
+# This workflow deploys static HTML files from the docs/ directory to GitHub Pages
+# IMPORTANT: GitHub Pages must be configured to use "GitHub Actions" as the source
+# in repository Settings > Pages > Source (not "Deploy from a branch")
+
 on:
   push:
     branches:
