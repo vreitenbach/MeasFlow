@@ -737,7 +737,21 @@ Offset  Hex                                              ASCII
 
 ## Appendix B: Version History
 
-The .meas binary file format uses two distinct version identifiers:
+### Version Identifiers Summary
+
+MeasFlow uses three independent version identifiers for different purposes:
+
+| Identifier | Current Value | Purpose | Location | Validation |
+|------------|---------------|---------|----------|------------|
+| **Specification Document Version** | **0.4** | Tracks this specification document's evolution | Document header (line 3) | N/A (informational only) |
+| **File Format Version** | **1** | Format variant identifier | File header offset 4 (uint16) | Exact-match (`== 1`) |
+| **Metadata Format Version** | **0.1** | Semantic versioning for metadata | Metadata segment prefix (uint8.uint8) | Major match, minor ≤ |
+
+> **Important**: The Specification Document Version (0.4) and Metadata Format Version (0.1) are **completely independent**. The document version tracks changes to this specification text, while the metadata version tracks the binary wire format. They do not need to match.
+
+### Detailed Descriptions
+
+The .meas binary file format uses two distinct version identifiers embedded in the file:
 
 1. **File Format Version** (uint16 at offset 4 in file header): A format variant identifier (not a semantic version). Readers use exact-match validation. Currently **1**. This identifies the overall binary structure and determines which parser to use.
 
