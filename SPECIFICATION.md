@@ -83,7 +83,7 @@ An .meas file consists of a fixed-size header followed by a chain of segments:
 | Offset | Size | Type    | Field              | Description                                      |
 |--------|------|---------|--------------------|--------------------------------------------------|
 | 0      | 4    | uint32  | Magic              | `0x5341454D` = ASCII `"MEAS\0"` (LE)              |
-| 4      | 2    | uint16  | Version            | Format version. Currently `1`.                    |
+| 4      | 2    | uint16  | Version            | Format variant identifier. Currently `1`.         |
 | 6      | 2    | uint16  | Flags              | Bit flags (see §4a-flags below).                 |
 | 8      | 8    | int64   | FirstSegmentOffset | Absolute byte offset to the first segment. Usually `64`. |
 | 16     | 8    | int64   | IndexOffset        | Reserved. Must be `0` for version 1.             |
@@ -94,7 +94,9 @@ An .meas file consists of a fixed-size header followed by a chain of segments:
 
 **Magic byte pattern** (hex): `4D 45 41 53`
 
-**Version negotiation**: Readers MUST reject files with `Version > 1` unless they understand the newer version. Readers MUST reject files where `Magic ≠ 0x5341454D`.
+**Version field**: This is a format variant identifier, not a semantic version number. Readers MUST use exact-match validation (`Version == 1`). Files with `Version ≠ 1` MUST be rejected unless the reader supports that specific format variant. For versioning within format variant 1, see the Metadata Format Version (§6).
+
+**Magic validation**: Readers MUST reject files where `Magic ≠ 0x5341454D`.
 
 ### §4a-flags. File Header Flags
 
@@ -683,7 +685,8 @@ A conforming writer SHOULD:
 ### Reader conformance
 
 A conforming reader MUST:
-- Validate the magic number and reject unknown versions
+- Validate the magic number (`Magic = 0x5341454D`)
+- Reject files with `Version ≠ 1` (exact-match validation; this is a format variant identifier, not a semantic version)
 - Handle multiple Data segments (chunks are additive)
 - Correctly decode both fixed-size and variable-length data
 
@@ -734,10 +737,11 @@ Offset  Hex                                              ASCII
 
 ## Appendix B: Version History
 
-The .meas binary file format uses two distinct version numbers:
+The .meas binary file format uses two distinct version identifiers:
 
-1. **File Format Version** (uint16 at offset 4 in file header): Bumped for breaking changes to the binary structure. Currently **1**.
-2. **Metadata Format Version** ([uint8: metaMajor][uint8: metaMinor] prefix in metadata segment when ExtendedMetadata flag is set): Bumped for changes to metadata encoding. Currently **0.1**.
+1. **File Format Version** (uint16 at offset 4 in file header): A format variant identifier (not a semantic version). Readers use exact-match validation. Currently **1**. This identifies the overall binary structure and determines which parser to use.
+
+2. **Metadata Format Version** ([uint8: metaMajor][uint8: metaMinor] prefix in metadata segment when ExtendedMetadata flag is set): Semantic versioning for metadata evolution within a format variant. Currently **0.1**. This enables fine-grained versioning and backward compatibility within format variant 1.
 
 ### Metadata Format Version History
 
