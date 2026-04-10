@@ -54,6 +54,9 @@ nav:
     - File Format: guide/file-format.md
   - Specification: specification.md
   - Resources: resources.md
+  - Legal:
+    - Impressum: legal/impressum.md
+    - Privacy Policy: legal/privacy.md
 
 markdown_extensions:
   # Python Markdown
