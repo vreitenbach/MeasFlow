@@ -12,7 +12,7 @@ Am Grünhof 6
 59069 Hamm
 
 **Kontakt:**
-E-Mail: vreitenbach@web.de
+E-Mail: support@vreitenbach.de
 
 ---
 
@@ -28,4 +28,4 @@ Am Grünhof 6
 59069 Hamm
 
 **Contact:**
-Email: vreitenbach@web.de
+Email: support@vreitenbach.de
