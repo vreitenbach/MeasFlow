@@ -28,7 +28,7 @@ Die MeasFlow-Bibliothek selbst enthält **keinerlei Telemetrie- oder Tracking-Fu
 ### 4. Kontakt
 
 Bei Fragen zum Datenschutz wenden Sie sich bitte an:
-[Your Email]
+support@vreitenbach.de
 
 ---
 
@@ -60,4 +60,4 @@ The MeasFlow library itself contains **no telemetry or tracking functionality**.
 ### 4. Contact
 
 If you have any questions about privacy, please contact:
-[Your Email]
+support@vreitenbach.de
