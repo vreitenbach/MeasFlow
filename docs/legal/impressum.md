@@ -2,32 +2,30 @@
 
 ## Impressum (Deutsch)
 
-Angaben gemäß § 5 TMG (Telemediengesetz):
+Angaben gemäß § 5 DDG (Digitale Dienste Gesetz):
 
 **Name:**
-[Your Full Name]
+Vitali Reitenbach
 
 **Anschrift:**
-[Your Street Address]
-[Your City, ZIP]
+Am Grünhof 6
+59069 Hamm
 
 **Kontakt:**
-E-Mail: [Your Email]
-Telefon: [Your Phone (optional)]
+E-Mail: vreitenbach@web.de
 
 ---
 
 ## Legal Notice (English)
 
-Information in accordance with § 5 TMG (German Telemedia Act):
+Information in accordance with § 5 DDG (German Telemedia Act):
 
 **Name:**
-[Your Full Name]
+Vitali Reitenbach
 
 **Address:**
-[Your Street Address]
-[Your City, ZIP]
+Am Grünhof 6
+59069 Hamm
 
 **Contact:**
-Email: [Your Email]
-Phone: [Your Phone (optional)]
+Email: vreitenbach@web.de
